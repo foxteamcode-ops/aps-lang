@@ -1,0 +1,1 @@
+struct DriverAccount { id: i64, balance: i64 } fn transfer(d: write DriverAccount, sum: i64) { d.balance += sum } fn main() { var d = DriverAccount { id: 1, balance: 1000 }; transfer(write d, 500); println(d.balance) }

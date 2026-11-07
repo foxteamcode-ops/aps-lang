@@ -1,0 +1,1 @@
+struct Packet { len: i64 } fn main() { region net_arena { let p = net_arena.alloc(Packet { len: 1460 }); println(p.len) } }

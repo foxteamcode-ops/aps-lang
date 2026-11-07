@@ -1,0 +1,62 @@
+// ============================================================================
+// Файл: 05_arrays_and_slices.aps
+// Описание: Массивы фиксированного размера `[T; N]`, динамические массивы,
+// срезы `[T]`, безопасная индексация с проверкой границ и обработка элементов.
+// ============================================================================
+
+module arrays_demo
+
+// Функция вычисляет сумму элементов массива или среза через право чтения `read`
+fn sum_elements(items: read [i64]) -> i64 {
+    var total: i64 = 0
+    for i in 0..items.len() {
+        total += items[i]
+    }
+    return total
+}
+
+// Удвоение всех элементов массива на месте через эксклюзивное право записи `write`
+fn scale_in_place(items: write [i64], factor: i64) {
+    for i in 0..items.len() {
+        items[i] = items[i] * factor
+    }
+}
+
+fn main() {
+    println("=== Массивы и срезы в APS ===")
+
+    // 1. Литерал массива с автоматическим выводом длины
+    let nums = [1, 2, 3, 4, 5]
+    print("Исходный массив nums, длина = ")
+    println(nums.len())
+
+    let initial_sum = sum_elements(read nums)
+    print("Сумма элементов nums = ")
+    println(initial_sum)
+
+    // 2. Изменяемый массив для модификации на месте
+    var metrics: [i64; 6] = [10, 20, 30, 40, 50, 60]
+    print("Первая метрика до изменения: ")
+    println(metrics[0])
+
+    // Модифицируем отдельный элемент по индексу
+    metrics[0] = 15
+
+    // Масштабируем весь массив через `write` capability
+    scale_in_place(write metrics, 2)
+
+    print("Метрики после умножения на 2: [")
+    for i in 0..metrics.len() {
+        print(metrics[i])
+        if i + 1 < metrics.len() {
+            print(", ")
+        }
+    }
+    println("]")
+
+    // 3. Работа с поддиапазоном (срезом) массива без копирования памяти
+    let middle_slice = metrics.slice(1, 4) // элементы с индексами 1, 2, 3
+    let middle_sum = sum_elements(read middle_slice)
+    print("Сумма центрального среза [1..4] = ")
+    println(middle_sum)
+}

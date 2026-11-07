@@ -1,0 +1,1 @@
+struct TaskItem { id: i64, title: String, done: bool } fn main() { var t = TaskItem { id: 1, title: "Build APS", done: true }; println(t.done) }

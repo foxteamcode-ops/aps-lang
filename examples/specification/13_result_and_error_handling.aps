@@ -1,0 +1,96 @@
+// ============================================================================
+// Файл: 13_result_and_error_handling.aps
+// Описание: Предсказуемая обработка ошибок без исключений (No Exceptions)
+// через алгебраический тип `Result<T, E>` (`Ok(T)`, `Err(E)`) и оператор
+// раннего возврата ошибки `?`.
+// ============================================================================
+
+module result_demo
+
+struct Account {
+    id: i64
+    owner: String
+    balance: i64
+}
+
+// Проверка корректности суммы перевода
+fn validate_amount(amount: i64) -> Result<i64, String> {
+    if amount <= 0 {
+        return Err("Сумма перевода должна быть строго положительной")
+    }
+    if amount > 1_000_000 {
+        return Err("Превышен разовый лимит операции (1 000 000)")
+    }
+    return Ok(amount)
+}
+
+// Списание средств со счёта
+fn debit_account(acc: write Account, amount: i64) -> Result<i64, String> {
+    if acc.balance < amount {
+        return Err("Недостаточно средств на счёте отправителя")
+    }
+    acc.balance -= amount
+    return Ok(acc.balance)
+}
+
+// Комплексная транзакция, использующая оператор `?` для автоматического
+// проброса ошибок вверх по стеку вызовов
+fn execute_transfer(
+    from_acc: write Account,
+    to_acc: write Account,
+    raw_amount: i64
+) -> Result<i64, String> {
+    // Если `validate_amount` вернёт `Err(...)`, оператор `?` немедленно
+    // завершит `execute_transfer` и вернёт эту ошибку вызывающему коду.
+    let valid_amount = validate_amount(raw_amount)?
+
+    // Аналогично проверяем и выполняем списание
+    let remaining_balance = debit_account(write from_acc, valid_amount)?
+
+    // Зачисляем средства получателю
+    to_acc.balance += valid_amount
+
+    return Ok(remaining_balance)
+}
+
+fn print_transfer_outcome(outcome: read Result<i64, String>) {
+    match outcome {
+        Ok(remaining) => {
+            print("[OK] Перевод выполнен успешно. Остаток отправителя: ")
+            println(remaining)
+        }
+        Err(err_msg) => {
+            print("[ОШИБКА] Перевод отклонён: ")
+            println(err_msg)
+        }
+    }
+}
+
+fn main() {
+    println("=== Обработка ошибок Result<T, E> и оператор ? в APS ===")
+
+    var sender = Account { id: 101, owner: "Alibek", balance: 5000 }
+    var receiver = Account { id: 202, owner: "Daniyar", balance: 1500 }
+
+    // 1. Успешный перевод
+    let res1 = execute_transfer(write sender, write receiver, 2000)
+    print_transfer_outcome(read res1)
+
+    // 2. Ошибка валидации (отрицательная сумма)
+    let res2 = execute_transfer(write sender, write receiver, -500)
+    print_transfer_outcome(read res2)
+
+    // 3. Ошибка недостатка средств
+    let res3 = execute_transfer(write sender, write receiver, 10000)
+    print_transfer_outcome(read res3)
+
+    print("Итоговый баланс отправителя (")
+    print(sender.owner)
+    print("): ")
+    println(sender.balance)
+
+    print("Итоговый баланс получателя (")
+    print(receiver.owner)
+    print("): ")
+    println(receiver.balance)
+}

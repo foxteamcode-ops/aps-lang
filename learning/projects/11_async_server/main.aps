@@ -1,0 +1,1 @@
+async fn fetch() -> i64 { 100 } fn main() { println("Async Server OK") }

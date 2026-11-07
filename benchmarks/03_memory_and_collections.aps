@@ -1,0 +1,128 @@
+// ============================================================================
+// Benchmark 03: Memory, Collections, Algorithms & String Processing Workload
+// Phase A (Collections & Memory Indexing):
+//   - Vec.new() dynamic push + 32-slot hash/ring buffer
+//   - 2,000,000 indexed lookups & read-modify-write updates (4,000,000 bounds
+//     checks `@aps_bounds_check` in APS vs Rust bounds check vs unchecked C)
+//   - In-place sorting & binary search verification
+// Phase B (String Processing):
+//   - 500,000 UTF-8 string equality & length inspections + 20,000 concatenations
+// ============================================================================
+
+module bench_memory_and_collections
+
+fn run_collections_and_memory(iterations: i64) -> i64 {
+    var vec_keys = Vec.new()
+    for k in 0..16 {
+        vec_keys.push((k * 2654435761) & 1048575)
+    }
+
+    var buckets = [
+        101, 203, 307, 409, 503, 607, 701, 809,
+        907, 1009, 1103, 1201, 1301, 1409, 1511, 1601,
+        1709, 1801, 1901, 2003, 2111, 2203, 2309, 2411,
+        2503, 2609, 2707, 2801, 2903, 3001, 3109, 3203
+    ]
+
+    var acc: i64 = 0
+    for i in 0..iterations {
+        let key_idx = i & 15
+        let key_val = vec_keys[key_idx]
+        let slot = (key_val + i) & 31
+        let prev = buckets[slot]
+        let updated = ((prev * 33) + key_val + (i & 255)) & 16777215
+        buckets[slot] = updated
+        acc += updated & 4095
+    }
+
+    // In-place Insertion Sort on the 32-element bucket table
+    for i in 1..32 {
+        let cur = buckets[i]
+        var j: i64 = i - 1
+        var sorting: bool = j >= 0
+        while sorting {
+            if buckets[j] > cur {
+                buckets[j + 1] = buckets[j]
+                j -= 1
+                sorting = j >= 0
+            } else {
+                sorting = false
+            }
+        }
+        buckets[j + 1] = cur
+    }
+
+    // Binary search over sorted 32-element table for 100,000 queries
+    var found_hits: i64 = 0
+    for q in 0..100000 {
+        let target = buckets[q & 31]
+        var lo: i64 = 0
+        var hi: i64 = 31
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            let mid_val = buckets[mid]
+            if mid_val == target {
+                found_hits += 1
+                lo = hi + 1
+            } else if mid_val < target {
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+    }
+
+    return acc + found_hits + buckets[0] + buckets[31]
+}
+
+fn run_string_workload(scan_iters: i64, concat_iters: i64) -> i64 {
+    let hdr_get = "GET /api/v1/orders/dispatch HTTP/1.1"
+    let hdr_post = "POST /api/v1/settlement/commit HTTP/1.1"
+    let hdr_probe = "GET /api/v1/orders/dispatch HTTP/1.1"
+
+    var str_acc: i64 = 0
+    for i in 0..scan_iters {
+        let n1 = hdr_get.len()
+        let n2 = hdr_post.len()
+        if (i & 1) == 0 {
+            if hdr_get == hdr_probe {
+                str_acc += n1
+            }
+        } else {
+            if hdr_get != hdr_post {
+                str_acc += n2
+            }
+        }
+    }
+
+    let prefix = "aps_tx_"
+    let suffix = "_ok"
+    for c in 0..concat_iters {
+        let combined = prefix + suffix
+        str_acc += combined.len() + (c & 3)
+    }
+
+    return str_acc
+}
+
+fn main() {
+    let t0 = time_now_ns()
+    let coll_sum = run_collections_and_memory(2000000)
+    let t1 = time_now_ns()
+    let str_sum = run_string_workload(500000, 20000)
+    let t2 = time_now_ns()
+
+    let coll_us = (t1 - t0) / 1000
+    let str_us = (t2 - t1) / 1000
+    let total_us = (t2 - t0) / 1000
+    let checksum = coll_sum + str_sum
+
+    print("BENCH_03_MEM_COLL elapsed_us=")
+    print(total_us)
+    print(" collections_us=")
+    print(coll_us)
+    print(" strings_us=")
+    print(str_us)
+    print(" checksum=")
+    println(checksum)
+}

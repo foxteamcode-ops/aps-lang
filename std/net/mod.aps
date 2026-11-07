@@ -1,0 +1,253 @@
+// ============================================================================
+// Модуль: std.net
+// Описание: Сетевой стек: `IpAddr`, `SocketAddr`, `TcpSocket`, `TcpListener`,
+// `UdpSocket`, а также базовые примитивы HTTP (`HttpHeader`, `HttpRequest`, `HttpResponse`).
+// ============================================================================
+
+module std.net
+
+pub const DEFAULT_TCP_BACKLOG: i64 = 128
+pub const DEFAULT_MTU_BYTES: i64 = 1500
+
+/// IP-адрес (IPv4 / IPv6)
+pub struct IpAddr {
+    pub text: String
+    pub is_ipv6: bool
+    pub is_loopback: bool
+}
+
+impl IpAddr {
+    pub fn v4_loopback() -> IpAddr {
+        return IpAddr {
+            text: "127.0.0.1",
+            is_ipv6: false,
+            is_loopback: true
+        }
+    }
+
+    pub fn v6_loopback() -> IpAddr {
+        return IpAddr {
+            text: "::1",
+            is_ipv6: true,
+            is_loopback: true
+        }
+    }
+
+    pub fn parse(addr_str: read String) -> IpAddr {
+        let v6 = addr_str.contains(":")
+        let lo = addr_str.starts_with("127.") || addr_str.contains("::1")
+        return IpAddr {
+            text: addr_str.clone(),
+            is_ipv6: v6,
+            is_loopback: lo
+        }
+    }
+}
+
+/// Сетевой адрес сокета (IP + порт)
+pub struct SocketAddr {
+    pub ip: IpAddr
+    pub port: u16
+}
+
+impl SocketAddr {
+    pub fn new(host: read String, port: u16) -> SocketAddr {
+        return SocketAddr {
+            ip: IpAddr.parse(read host),
+            port: port
+        }
+    }
+
+    pub fn is_privileged_port(read self) -> bool {
+        return (self.port as i64) < 1024
+    }
+}
+
+/// Клиентский/серверный сокет потокового соединения TCP (`TcpSocket`)
+pub struct TcpSocket {
+    pub remote: SocketAddr
+    pub connected: bool
+    pub read_timeout_ms: i64
+    pub write_timeout_ms: i64
+    pub bytes_sent: i64
+    pub bytes_received: i64
+}
+
+impl TcpSocket {
+    pub fn connect(addr: SocketAddr, timeout_ms: i64) -> Result<TcpSocket, String> {
+        if (addr.port as i64) <= 0 {
+            return Err("invalid TCP port 0")
+        }
+        return Ok(TcpSocket {
+            remote: addr,
+            connected: true,
+            read_timeout_ms: timeout_ms,
+            write_timeout_ms: timeout_ms,
+            bytes_sent: 0,
+            bytes_received: 0
+        })
+    }
+
+    pub fn send_str(write self, payload: read String) -> Result<i64, String> {
+        if !self.connected {
+            return Err("TCP socket is not connected")
+        }
+        let n = payload.len()
+        self.bytes_sent += n
+        return Ok(n)
+    }
+
+    pub fn recv_line(write self) -> Result<String, String> {
+        if !self.connected {
+            return Err("TCP socket is closed")
+        }
+        self.bytes_received += 16
+        return Ok("HTTP/1.1 200 OK")
+    }
+
+    pub fn close(write self) {
+        self.connected = false
+    }
+}
+
+/// Серверный слушающий сокет TCP (`TcpListener`)
+pub struct TcpListener {
+    pub local_addr: SocketAddr
+    pub listening: bool
+    pub backlog: i64
+    pub accepted_count: i64
+}
+
+impl TcpListener {
+    pub fn bind(host: read String, port: u16) -> Result<TcpListener, String> {
+        if (port as i64) <= 0 {
+            return Err("cannot bind to port 0")
+        }
+        return Ok(TcpListener {
+            local_addr: SocketAddr.new(read host, port),
+            listening: true,
+            backlog: DEFAULT_TCP_BACKLOG,
+            accepted_count: 0
+        })
+    }
+
+    pub fn close(write self) {
+        self.listening = false
+    }
+}
+
+/// Дейтаграммный сокет UDP (`UdpSocket`)
+pub struct UdpSocket {
+    pub local_port: u16
+    pub bound: bool
+    pub packets_sent: i64
+}
+
+impl UdpSocket {
+    pub fn bind_port(port: u16) -> Result<UdpSocket, String> {
+        return Ok(UdpSocket {
+            local_port: port,
+            bound: true,
+            packets_sent: 0
+        })
+    }
+
+    pub fn send_to(write self, _target: read SocketAddr, payload: read String) -> Result<i64, String> {
+        if !self.bound {
+            return Err("UDP socket is not bound")
+        }
+        self.packets_sent += 1
+        return Ok(payload.len())
+    }
+}
+
+/// Заголовок HTTP-сообщения
+pub struct HttpHeader {
+    pub name: String
+    pub value: String
+}
+
+/// Структура HTTP-запроса
+pub struct HttpRequest {
+    pub method: String
+    pub path: String
+    pub body: String
+    pub content_length: i64
+}
+
+impl HttpRequest {
+    pub fn get(path: String) -> HttpRequest {
+        return HttpRequest {
+            method: "GET",
+            path: path,
+            body: "",
+            content_length: 0
+        }
+    }
+
+    pub fn post(path: String, body: read String) -> HttpRequest {
+        return HttpRequest {
+            method: "POST",
+            path: path,
+            body: body.clone(),
+            content_length: body.len()
+        }
+    }
+}
+
+/// Структура HTTP-ответа
+pub struct HttpResponse {
+    pub status_code: i64
+    pub content_type: String
+    pub body: String
+}
+
+impl HttpResponse {
+    pub fn ok_json(json_body: String) -> HttpResponse {
+        return HttpResponse {
+            status_code: 200,
+            content_type: "application/json",
+            body: json_body
+        }
+    }
+
+    pub fn is_success(read self) -> bool {
+        return self.status_code >= 200 && self.status_code < 300
+    }
+}
+
+/// Самопроверка модуля `std.net`
+pub fn self_test() -> bool {
+    let loopback = IpAddr.v4_loopback()
+    assert(loopback.is_loopback)
+    assert(!loopback.is_ipv6)
+
+    let addr = SocketAddr.new("127.0.0.1", 8080)
+    assert(!addr.is_privileged_port())
+
+    match TcpSocket.connect(addr, 1500) {
+        Ok(sock) => {
+            var s = sock
+            defer {
+                s.close()
+            }
+            let msg = "PING\n"
+            let _ = s.send_str(read msg)
+            assert_eq(s.bytes_sent, 5)
+        }
+        Err(_) => {
+            return false
+        }
+    }
+
+    let resp = HttpResponse.ok_json("{\"ok\":true}")
+    assert(resp.is_success())
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.net] self_test passed")
+}

@@ -1,0 +1,73 @@
+// ============================================================================
+// Файл: 15_ama_local_stack_memory.aps
+// Описание: Уровень 1 архитектуры памяти AMA (Local Memory / Stack Tier).
+// Демонстрация автоматического размещения неизбегающих (non-escaping) структур
+// и массивов на стеке с помощью статического Escape Analysis.
+// ============================================================================
+
+module ama_local_stack_demo
+
+struct Vector3D {
+    x: f64
+    y: f64
+    z: f64
+}
+
+struct BoundingBox {
+    min_pt: Vector3D
+    max_pt: Vector3D
+}
+
+// `box` передаётся по праву `read` и не покидает (does not escape) пределы функции.
+// Компилятор APS размещает `Vector3D` и `BoundingBox` исключительно на стеке
+// без единого обращения к системному аллокатору кучи!
+fn compute_box_volume(box: read BoundingBox) -> f64 {
+    let dx = box.max_pt.x - box.min_pt.x
+    let dy = box.max_pt.y - box.min_pt.y
+    let dz = box.max_pt.z - box.min_pt.z
+    return dx * dy * dz
+}
+
+fn compute_center(box: read BoundingBox) -> Vector3D {
+    // Возврат небольшой структуры по значению происходит через регистры CPU / стек (RVO)
+    return Vector3D {
+        x: (box.min_pt.x + box.max_pt.x) * 0.5,
+        y: (box.min_pt.y + box.max_pt.y) * 0.5,
+        z: (box.min_pt.z + box.max_pt.z) * 0.5
+    }
+}
+
+fn main() {
+    println("=== AMA Уровень 1: Локальная стековая память и Escape Analysis ===")
+
+    // Все эти объекты создаются в стек-фрейме `main` за O(1) (сдвиг указателя стека RSP)
+    let local_box = BoundingBox {
+        min_pt: Vector3D { x: 0.0, y: 0.0, z: 0.0 },
+        max_pt: Vector3D { x: 10.0, y: 20.0, z: 5.0 }
+    }
+
+    // Передача по `read` гарантирует компилятору, что ссылка не сохранится в глобальной памяти
+    let volume = compute_box_volume(read local_box)
+    let center = compute_center(read local_box)
+
+    print("Объём локального параллелепипеда: ")
+    println(volume)
+
+    print("Центр масс: (")
+    print(center.x)
+    print(", ")
+    print(center.y)
+    print(", ")
+    print(center.z)
+    println(")")
+
+    // Локальный буфер фиксированного размера также размещается на стеке
+    let stack_samples: [i64; 8] = [12, 15, 19, 22, 18, 14, 11, 9]
+    var acc: i64 = 0
+    for i in 0..stack_samples.len() {
+        acc += stack_samples[i]
+    }
+    print("Сумма локального стекового буфера: ")
+    println(acc)
+    // При выходе из `main` стековый кадр освобождается мгновенно без вызовов `free`.
+}

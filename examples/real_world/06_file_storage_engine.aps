@@ -1,0 +1,191 @@
+// ============================================================================
+// Файл: examples/real_world/06_file_storage_engine.aps
+// Описание: Журналируемый файловый движок хранения записей (Write-Ahead Log / WAL)
+// с проверкой целостности страниц, контрольными точками (Checkpoints),
+// гарантированным сбросом буферов и закрытием дескрипторов через `defer`,
+// а также предсказуемой обработкой ошибок через `Result<T, E>` и оператор `?`.
+// ============================================================================
+
+module file_storage_engine
+
+import std.fs
+import std.io
+
+// Запись в журнале предзаписи (WAL Entry)
+struct WalRecord {
+    lsn: i64          // Log Sequence Number
+    tx_id: i64        // Идентификатор транзакции
+    op_type: i64      // 1 = INSERT, 2 = UPDATE, 3 = CHECKPOINT
+    key_hash: i64
+    value_delta: i64
+    record_bytes: i64
+}
+
+// Дескриптор открытого файлового сегмента WAL
+struct WalSegmentFile {
+    file_path: String
+    segment_id: i64
+    is_open: bool
+    flushed_lsn: i64
+    written_bytes: i64
+    records_count: i64
+}
+
+// Состояние восстановления хранилища после проигрывания журнала (Replay)
+struct RecoveryState {
+    replayed_records: i64
+    committed_sum: i64
+    last_checkpoint_lsn: i64
+}
+
+// Открытие сегмента журнала предзаписи
+fn open_wal_segment(path: String, seg_id: i64) -> Result<WalSegmentFile, String> {
+    let seg_obj = WalSegmentFile {
+        file_path: path,
+        segment_id: seg_id,
+        is_open: true,
+        flushed_lsn: 0,
+        written_bytes: 64,
+        records_count: 0
+    }
+    var res: Result<WalSegmentFile, String> = Ok(seg_obj)
+    if seg_id <= 0 {
+        res = Err("Некорректный идентификатор сегмента WAL")
+    }
+    return res
+}
+
+// Добавление записи в сегмент WAL (`write WalSegmentFile`, `read WalRecord`)
+fn append_wal_record(
+    seg: write WalSegmentFile,
+    rec: read WalRecord
+) -> Result<i64, String> {
+    var res: Result<i64, String> = Err("Ошибка записи WAL")
+
+    if !seg.is_open {
+        res = Err("Попытка записи в закрытый сегмент WAL")
+    } else if rec.lsn <= seg.flushed_lsn {
+        res = Err("Нарушение монотонности LSN (Log Sequence Number)")
+    } else if rec.record_bytes <= 0 || rec.record_bytes > 16384 {
+        res = Err("Недопустимый размер страницы записи WAL")
+    } else {
+        seg.written_bytes += rec.record_bytes
+        seg.records_count += 1
+        seg.flushed_lsn = rec.lsn
+        res = Ok(seg.written_bytes)
+    }
+
+    return res
+}
+
+// Принудительная синхронизация сегмента с диском (`fsync`) и закрытие
+fn flush_and_close_segment(seg: write WalSegmentFile) {
+    seg.is_open = false
+    print("  [defer WAL fsync] Сегмент '")
+    print(seg.file_path)
+    print("' (#")
+    print(seg.segment_id)
+    print(") синхронизирован и закрыт. Записано байт: ")
+    println(seg.written_bytes)
+}
+
+// Пакетная запись транзакционного журнала с гарантированным закрытием через `defer`
+fn write_wal_batch(
+    path: String,
+    seg_id: i64,
+    records: read [WalRecord]
+) -> Result<i64, String> {
+    var segment = WalSegmentFile {
+        file_path: path,
+        segment_id: seg_id,
+        is_open: seg_id > 0,
+        flushed_lsn: 0,
+        written_bytes: 64,
+        records_count: 0
+    }
+
+    // Детерминированное закрытие файла сегмента при выходе из области видимости
+    defer {
+        if segment.is_open {
+            flush_and_close_segment(write segment)
+        }
+    }
+
+    for i in 0..records.len() {
+        if seg_id > 0 {
+            let rec = records[i]
+            let _total = append_wal_record(write segment, read rec)?
+        }
+    }
+
+    var batch_res: Result<i64, String> = Err("Некорректный идентификатор сегмента WAL")
+    if seg_id > 0 {
+        batch_res = Ok(segment.records_count)
+    }
+
+    return batch_res
+}
+
+// Восстановление состояния (Crash Recovery Replay) в аренном регионе `recovery_arena`
+fn replay_wal_records(records: read [WalRecord]) -> RecoveryState {
+    var state = RecoveryState {
+        replayed_records: 0,
+        committed_sum: 0,
+        last_checkpoint_lsn: 0
+    }
+
+    region recovery_arena {
+        for i in 0..records.len() {
+            let rec = records[i]
+            state.replayed_records += 1
+            if rec.op_type == 1 || rec.op_type == 2 {
+                state.committed_sum += rec.value_delta
+            } else if rec.op_type == 3 {
+                state.last_checkpoint_lsn = rec.lsn
+            }
+        }
+    }
+
+    return state
+}
+
+fn main() {
+    println("=== APS Real-World #06: Файловый движок хранения Write-Ahead Log (WAL) ===")
+
+    let wal_entries = [
+        WalRecord { lsn: 1001, tx_id: 10, op_type: 1, key_hash: 501, value_delta: 2500, record_bytes: 128 },
+        WalRecord { lsn: 1002, tx_id: 11, op_type: 1, key_hash: 502, value_delta: 4200, record_bytes: 128 },
+        WalRecord { lsn: 1003, tx_id: 10, op_type: 2, key_hash: 501, value_delta: -500, record_bytes: 96 },
+        WalRecord { lsn: 1004, tx_id: 12, op_type: 3, key_hash: 0,   value_delta: 0,    record_bytes: 64 },
+        WalRecord { lsn: 1005, tx_id: 13, op_type: 1, key_hash: 503, value_delta: 1800, record_bytes: 128 }
+    ]
+
+    // 1. Записываем пакет записей в сегмент журнала
+    match write_wal_batch("data/wal_0001.log", 1, read wal_entries) {
+        Ok(written_cnt) => {
+            print("[WAL Engine] Успешно зафиксировано записей в журнале: ")
+            println(written_cnt)
+        }
+        Err(_) => {
+            println("[WAL Engine] Ошибка записи журнала предзаписи!")
+        }
+    }
+
+    // 2. Проверяем защиту от некорректного идентификатора сегмента
+    match write_wal_batch("data/wal_invalid.log", -1, read wal_entries) {
+        Ok(cnt) => println(cnt),
+        Err(_) => {
+            println("[WAL Engine] Ожидаемо отклонено открытие сегмента с некорректным ID (-1).")
+        }
+    }
+
+    // 3. Выполняем восстановление состояния (WAL Replay)
+    let recovery = replay_wal_records(read wal_entries)
+    println("--- Результат восстановления состояния (WAL Replay) ---")
+    print("  Проиграно записей WAL   : ")
+    println(recovery.replayed_records)
+    print("  Итоговая сумма значений : ")
+    println(recovery.committed_sum)
+    print("  Последний Checkpoint LSN: ")
+    println(recovery.last_checkpoint_lsn)
+}

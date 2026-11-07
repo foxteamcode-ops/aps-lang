@@ -1,0 +1,188 @@
+// ============================================================================
+// Модуль: std.math
+// Описание: Математические константы, целочисленные и вещественные функции:
+// `abs_i64`, `min_i64`, `max_i64`, `clamp_i64`, `pow_i64`, `gcd`, `lcm`,
+// `lerp`, `StatsSummary`.
+// ============================================================================
+
+module std.math
+
+pub const PI: f64 = 3.14159265358979323846
+pub const TAU: f64 = 6.28318530717958647692
+pub const E: f64 = 2.71828182845904523536
+pub const SQRT_2: f64 = 1.41421356237309504880
+pub const I64_MAX_SAFE: i64 = 9223372036854775807
+
+/// Статистическая сводка числового ряда
+pub struct StatsSummary {
+    pub count: i64
+    pub sum: i64
+    pub min_val: i64
+    pub max_val: i64
+}
+
+impl StatsSummary {
+    pub fn from_slice(values: read [i64]) -> StatsSummary {
+        if values.len() == 0 {
+            return StatsSummary {
+                count: 0,
+                sum: 0,
+                min_val: 0,
+                max_val: 0
+            }
+        }
+        var s: i64 = 0
+        var mn: i64 = values[0]
+        var mx: i64 = values[0]
+        for i in 0..values.len() {
+            let v = values[i]
+            s += v
+            if v < mn {
+                mn = v
+            }
+            if v > mx {
+                mx = v
+            }
+        }
+        return StatsSummary {
+            count: values.len(),
+            sum: s,
+            min_val: mn,
+            max_val: mx
+        }
+    }
+
+    pub fn mean_i64(read self) -> i64 {
+        if self.count <= 0 {
+            return 0
+        }
+        return self.sum / self.count
+    }
+
+    pub fn range_span(read self) -> i64 {
+        return self.max_val - self.min_val
+    }
+}
+
+/// Модуль целого числа `i64`
+pub fn abs_i64(x: i64) -> i64 {
+    if x < 0 {
+        return -x
+    }
+    return x
+}
+
+/// Минимум из двух целых чисел `i64`
+pub fn min_i64(a: i64, b: i64) -> i64 {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+/// Максимум из двух целых чисел `i64`
+pub fn max_i64(a: i64, b: i64) -> i64 {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+/// Ограничение числа `x` диапазоном `[lo, hi]`
+pub fn clamp_i64(x: i64, lo: i64, hi: i64) -> i64 {
+    if x < lo {
+        return lo
+    }
+    if x > hi {
+        return hi
+    }
+    return x
+}
+
+/// Быстрое возведение `base` в неотрицательную степень `exp`
+pub fn pow_i64(base: i64, exp: i64) -> i64 {
+    if exp <= 0 {
+        return 1
+    }
+    var result: i64 = 1
+    var b: i64 = base
+    var e: i64 = exp
+    while e > 0 {
+        if (e % 2) == 1 {
+            result = result * b
+        }
+        b = b * b
+        e = e / 2
+    }
+    return result
+}
+
+/// Наибольший общий делитель (алгоритм Евклида)
+pub fn gcd(a: i64, b: i64) -> i64 {
+    var x = abs_i64(a)
+    var y = abs_i64(b)
+    while y != 0 {
+        let r = x % y
+        x = y
+        y = r
+    }
+    return x
+}
+
+/// Наименьшее общее кратное
+pub fn lcm(a: i64, b: i64) -> i64 {
+    if a == 0 || b == 0 {
+        return 0
+    }
+    let g = gcd(a, b)
+    return abs_i64((a / g) * b)
+}
+
+/// Модуль вещественного числа `f64`
+pub fn abs_f64(x: f64) -> f64 {
+    if x < 0.0 {
+        return -x
+    }
+    return x
+}
+
+/// Линейная интерполяция между `a` и `b` с коэффициентом `t` в `[0.0, 1.0]`
+pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    return a + (b - a) * t
+}
+
+/// Квадратный корень вещественного числа `f64`
+pub fn sqrt_f64(x: f64) -> f64 {
+    if x <= 0.0 {
+        return 0.0
+    }
+    return sqrt(x)
+}
+
+/// Самопроверка модуля `std.math`
+pub fn self_test() -> bool {
+    assert_eq(abs_i64(-42), 42)
+    assert_eq(min_i64(10, 25), 10)
+    assert_eq(max_i64(10, 25), 25)
+    assert_eq(clamp_i64(150, 0, 100), 100)
+    assert_eq(clamp_i64(-5, 0, 100), 0)
+    assert_eq(pow_i64(2, 10), 1024)
+    assert_eq(gcd(48, 18), 6)
+    assert_eq(lcm(12, 18), 36)
+
+    let mid = lerp(10.0, 20.0, 0.5)
+    assert(mid > 14.9 && mid < 15.1)
+
+    let samples = [10, 20, 30, 40, 50]
+    let st = StatsSummary.from_slice(read samples)
+    assert_eq(st.mean_i64(), 30)
+    assert_eq(st.range_span(), 40)
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.math] self_test passed")
+}

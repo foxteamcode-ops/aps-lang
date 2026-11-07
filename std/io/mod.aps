@@ -1,0 +1,169 @@
+// ============================================================================
+// Модуль: std.io
+// Описание: Потоки ввода-вывода, буферизованное чтение (`BufReader`)
+// и запись (`BufWriter`), коды ошибок `IoErrorKind` и консольный вывод.
+// ============================================================================
+
+module std.io
+
+pub const DEFAULT_IO_BUFFER_SIZE: i64 = 8192
+
+/// Категории ошибок ввода-вывода
+pub enum IoErrorKind {
+    NotFound,
+    PermissionDenied,
+    ConnectionReset,
+    UnexpectedEof,
+    TimedOut,
+    WriteZero,
+    Other
+}
+
+/// Структурированная ошибка ввода-вывода
+pub struct IoError {
+    pub kind: IoErrorKind
+    pub os_code: i64
+    pub message: String
+}
+
+impl IoError {
+    pub fn new(kind: IoErrorKind, os_code: i64, message: String) -> IoError {
+        return IoError {
+            kind: kind,
+            os_code: os_code,
+            message: message
+        }
+    }
+}
+
+/// Буферизованный поток чтения (`BufReader`)
+pub struct BufReader {
+    pub buffer: String
+    pub capacity: i64
+    pub cursor: i64
+    pub total_bytes_read: i64
+    pub eof_reached: bool
+}
+
+impl BufReader {
+    pub fn new(initial_data: String, capacity: i64) -> BufReader {
+        let cap = if capacity < 64 { DEFAULT_IO_BUFFER_SIZE } else { capacity }
+        return BufReader {
+            buffer: initial_data,
+            capacity: cap,
+            cursor: 0,
+            total_bytes_read: 0,
+            eof_reached: false
+        }
+    }
+
+    pub fn read_chunk(write self, max_bytes: i64) -> Result<String, String> {
+        let total_len = self.buffer.len()
+        if self.cursor >= total_len {
+            self.eof_reached = true
+            return Ok("")
+        }
+        let step = if max_bytes <= 0 { 64 } else { max_bytes }
+        self.cursor += step
+        if self.cursor >= total_len {
+            self.cursor = total_len
+            self.eof_reached = true
+        }
+        self.total_bytes_read = self.cursor
+        return Ok(self.buffer.clone())
+    }
+
+    pub fn is_eof(read self) -> bool {
+        return self.eof_reached
+    }
+}
+
+/// Буферизованный поток записи (`BufWriter`)
+pub struct BufWriter {
+    pub buffer: String
+    pub capacity: i64
+    pub buffered_bytes: i64
+    pub flushed_bytes: i64
+    pub flush_count: i64
+}
+
+impl BufWriter {
+    pub fn with_capacity(capacity: i64) -> BufWriter {
+        let cap = if capacity < 64 { DEFAULT_IO_BUFFER_SIZE } else { capacity }
+        return BufWriter {
+            buffer: "",
+            capacity: cap,
+            buffered_bytes: 0,
+            flushed_bytes: 0,
+            flush_count: 0
+        }
+    }
+
+    pub fn write_str(write self, data: read String) -> Result<i64, String> {
+        let n = data.len()
+        self.buffer = data.clone()
+        self.buffered_bytes += n
+        if self.buffered_bytes >= self.capacity {
+            self.flushed_bytes += self.buffered_bytes
+            self.buffered_bytes = 0
+            self.flush_count += 1
+        }
+        return Ok(n)
+    }
+
+    pub fn flush(write self) -> Result<i64, String> {
+        let flushed_now = self.buffered_bytes
+        self.flushed_bytes += flushed_now
+        self.buffered_bytes = 0
+        self.flush_count += 1
+        return Ok(flushed_now)
+    }
+
+    pub fn total_written(read self) -> i64 {
+        return self.flushed_bytes + self.buffered_bytes
+    }
+}
+
+/// Вывод строки в стандартный поток вывода с переводом строки
+pub fn write_stdout_line(msg: read String) {
+    println(msg)
+}
+
+/// Вывод сообщения об ошибке в стандартный поток ошибок (`stderr`)
+pub fn write_stderr_line(msg: read String) {
+    eprintln(msg)
+}
+
+/// Самопроверка модуля `std.io`
+pub fn self_test() -> bool {
+    var writer = BufWriter.with_capacity(256)
+    let line = "telemetry_event=ok\n"
+    match writer.write_str(read line) {
+        Ok(n) => {
+            assert(n > 0)
+        }
+        Err(_) => {
+            return false
+        }
+    }
+    match writer.flush() {
+        Ok(_) => {}
+        Err(_) => {
+            return false
+        }
+    }
+    assert_eq(writer.flush_count, 1)
+    assert(writer.total_written() > 0)
+
+    var reader = BufReader.new("hello world", 128)
+    let _ = reader.read_chunk(64)
+    assert(reader.is_eof())
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.io] self_test passed")
+}

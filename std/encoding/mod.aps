@@ -1,0 +1,162 @@
+// ============================================================================
+// Модуль: std.encoding
+// Описание: Кодировки и форматы сериализации данных:
+// `HexEncoder`, `Base64Codec`, `CsvRecord`, `JsonToken`.
+// ============================================================================
+
+module std.encoding
+
+/// Кодировщик и декодировщик шестнадцатеричного представления (`HexEncoder`)
+pub struct HexEncoder {
+    pub uppercase: bool
+    pub encoded_bytes: i64
+}
+
+impl HexEncoder {
+    pub fn new(uppercase: bool) -> HexEncoder {
+        return HexEncoder {
+            uppercase: uppercase,
+            encoded_bytes: 0
+        }
+    }
+
+    pub fn encoded_length(input_bytes: i64) -> i64 {
+        if input_bytes <= 0 {
+            return 0
+        }
+        return input_bytes * 2
+    }
+
+    pub fn decoded_length(hex_chars: i64) -> Result<i64, String> {
+        if hex_chars < 0 || (hex_chars % 2) != 0 {
+            return Err("hex string length must be even")
+        }
+        return Ok(hex_chars / 2)
+    }
+
+    pub fn encode_u8_nibble(nibble: i64) -> i64 {
+        let masked = nibble & 15
+        if masked < 10 {
+            return 48 + masked
+        }
+        return 87 + masked
+    }
+}
+
+/// Кодек Base64 (RFC 4648) (`Base64Codec`)
+pub struct Base64Codec {
+    pub url_safe: bool
+    pub with_padding: bool
+}
+
+impl Base64Codec {
+    pub fn standard() -> Base64Codec {
+        return Base64Codec {
+            url_safe: false,
+            with_padding: true
+        }
+    }
+
+    pub fn url_safe_no_pad() -> Base64Codec {
+        return Base64Codec {
+            url_safe: true,
+            with_padding: false
+        }
+    }
+
+    pub fn encoded_size(read self, raw_len: i64) -> i64 {
+        if raw_len <= 0 {
+            return 0
+        }
+        if self.with_padding {
+            return ((raw_len + 2) / 3) * 4
+        }
+        return (raw_len * 4 + 2) / 3
+    }
+}
+
+/// Запись табличного формата CSV (`CsvRecord`)
+pub struct CsvRecord {
+    pub line_number: i64
+    pub field_count: i64
+    pub raw_line: String
+    pub delimiter_ascii: i64
+}
+
+impl CsvRecord {
+    pub fn from_line(line_number: i64, raw_line: read String, field_count: i64) -> CsvRecord {
+        return CsvRecord {
+            line_number: line_number,
+            field_count: field_count,
+            raw_line: raw_line.clone(),
+            delimiter_ascii: 44
+        }
+    }
+
+    pub fn is_valid(read self) -> bool {
+        return self.field_count > 0 && !self.raw_line.is_empty()
+    }
+}
+
+/// Тип лексемы JSON-потока (`JsonTokenKind`)
+pub enum JsonTokenKind {
+    ObjectStart,
+    ObjectEnd,
+    ArrayStart,
+    ArrayEnd,
+    StringValue,
+    NumberValue,
+    BoolValue,
+    NullValue
+}
+
+/// Токен потокового парсера JSON (`JsonToken`)
+pub struct JsonToken {
+    pub kind: JsonTokenKind
+    pub lexeme: String
+    pub byte_offset: i64
+}
+
+impl JsonToken {
+    pub fn new(kind: JsonTokenKind, lexeme: String, byte_offset: i64) -> JsonToken {
+        return JsonToken {
+            kind: kind,
+            lexeme: lexeme,
+            byte_offset: byte_offset
+        }
+    }
+}
+
+/// Самопроверка модуля `std.encoding`
+pub fn self_test() -> bool {
+    assert_eq(HexEncoder.encoded_length(16), 32)
+    match HexEncoder.decoded_length(32) {
+        Ok(n) => {
+            assert_eq(n, 16)
+        }
+        Err(_) => {
+            return false
+        }
+    }
+    assert_eq(HexEncoder.encode_u8_nibble(0), 48)
+    assert_eq(HexEncoder.encode_u8_nibble(10), 97)
+
+    let b64 = Base64Codec.standard()
+    assert_eq(b64.encoded_size(3), 4)
+    assert_eq(b64.encoded_size(4), 8)
+
+    let row_str = "1,Alibek,1000"
+    let rec = CsvRecord.from_line(1, read row_str, 3)
+    assert(rec.is_valid())
+
+    let tok = JsonToken.new(JsonTokenKind::ObjectStart, "{", 0)
+    assert_eq(tok.byte_offset, 0)
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.encoding] self_test passed")
+}

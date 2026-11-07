@@ -1,0 +1,63 @@
+// ============================================================================
+// Файл: 22_closures_and_higher_order_functions.aps
+// Описание: Анонимные функции (замыкания `|params| -> Ret { ... }`), захват
+// контекста окружения и функции высшего порядка (Higher-Order Functions).
+// ============================================================================
+
+module closures_demo
+
+// Функция высшего порядка: применяет переданное преобразование `transform`
+// к каждому элементу среза и возвращает сумму результатов
+fn map_and_sum(items: read [i64], transform: fn(i64) -> i64) -> i64 {
+    var total: i64 = 0
+    for i in 0..items.len() {
+        let mapped = transform(items[i])
+        total += mapped
+    }
+    return total
+}
+
+// Подсчёт количества элементов, удовлетворяющих предикату
+fn count_matching(items: read [i64], predicate: fn(i64) -> bool) -> i64 {
+    var matched: i64 = 0
+    for i in 0..items.len() {
+        if predicate(items[i]) {
+            matched += 1
+        }
+    }
+    return matched
+}
+
+fn main() {
+    println("=== Замыкания и функции высшего порядка в APS ===")
+
+    // 1. Объявление замыканий по каноническому синтаксису APS
+    let double = |x: i64| -> i64 { x * 2 }
+    let square = |x: i64| -> i64 { x * x }
+
+    print("Вызов double(21) = ")
+    println(double(21))
+    print("Вызов square(12) = ")
+    println(square(12))
+
+    // 2. Передача замыканий в функцию высшего порядка `map_and_sum`
+    let nums = [1, 2, 3, 4, 5]
+
+    let sum_doubled = map_and_sum(read nums, double)
+    let sum_squared = map_and_sum(read nums, square)
+
+    print("Сумма удвоенных элементов [1..5]: ")
+    println(sum_doubled)
+    print("Сумма квадратов элементов [1..5]: ")
+    println(sum_squared)
+
+    // 3. Замыкание с захватом порога из локального контекста
+    let threshold: i64 = 3
+    let is_above_threshold = |val: i64| -> bool { val > threshold }
+
+    let count_high = count_matching(read nums, is_above_threshold)
+    print("Количество элементов строго больше ")
+    print(threshold)
+    print(": ")
+    println(count_high)
+}

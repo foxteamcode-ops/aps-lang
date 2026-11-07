@@ -1,0 +1,140 @@
+// ============================================================================
+// Стресс-тест #1: Движок физики частиц реального времени и замер FPS
+// Нагрузка: 20 000 частиц на кадр x 100 кадров = 2 000 000 физических шагов
+// Метрики: Время кадра (us), Средний FPS, Min/Max FPS, Кинетическая энергия
+// ============================================================================
+
+module physics_particles_fps
+
+// Симуляция одного физического кадра для `count` частиц
+fn simulate_frame(count: i64, frame_index: i64) -> i64 {
+    var frame_energy: i64 = 0
+    var i: i64 = 0
+    let gravity: i64 = 980
+    let box_width: i64 = 100000
+    let box_height: i64 = 100000
+
+    while i < count {
+        // Процедурные координаты и скорости частицы
+        var px = (i * 7919 + frame_index * 17) % box_width
+        var py = (i * 6271 + frame_index * 31) % box_height
+        var vx = (i * 3571) % 500 - 250
+        var vy = (i * 4787) % 500 - 250 + (frame_index % 40)
+
+        // Шаг физической интеграции Эйлера: скорость + гравитация
+        vy += (gravity / 100)
+        px += vx
+        py += vy
+
+        // Столкновение с границами бокса (коэффициент упругости 85%)
+        if px < 0 {
+            px = -px
+            vx = -(vx * 85 / 100)
+        }
+        if px > box_width {
+            px = box_width - (px - box_width)
+            vx = -(vx * 85 / 100)
+        }
+        if py < 0 {
+            py = -py
+            vy = -(vy * 85 / 100)
+        }
+        if py > box_height {
+            py = box_height - (py - box_height)
+            vy = -(vy * 85 / 100)
+        }
+
+        // Кинетическая энергия: E_k = (m * v^2) / 2
+        let v_sq = (vx * vx) + (vy * vy)
+        let mass = (i % 8) + 1
+        frame_energy += (mass * v_sq) / 2
+
+        i += 1
+    }
+
+    return frame_energy
+}
+
+fn main() {
+    println("==================================================================")
+    println("      APS PARTICLE PHYSICS ENGINE & REAL-TIME FPS BENCHMARK       ")
+    println("      Workload: 20,000 Particles/Frame | 100 Frames (2M Updates)  ")
+    println("==================================================================")
+
+    let particle_count: i64 = 20000
+    let total_frames: i64 = 100
+
+    println("Инициализация физического пространства (100000 x 100000)...")
+    print("Количество активных частиц : ")
+    println(particle_count)
+    print("Число симулируемых кадров  : ")
+    println(total_frames)
+    println("------------------------------------------------------------------")
+
+    var total_energy_checksum: i64 = 0
+    var total_time_ns: i64 = 0
+    var min_frame_ns: i64 = 9999999999
+    var max_frame_ns: i64 = 0
+
+    let start_all_ns = aps_time_now_ns()
+
+    var frame: i64 = 0
+    while frame < total_frames {
+        let t_start = aps_time_now_ns()
+
+        let energy = simulate_frame(particle_count, frame)
+        total_energy_checksum += energy
+
+        let t_end = aps_time_now_ns()
+        let dt_ns = t_end - t_start
+
+        total_time_ns += dt_ns
+        if dt_ns < min_frame_ns {
+            min_frame_ns = dt_ns
+        }
+        if dt_ns > max_frame_ns {
+            max_frame_ns = dt_ns
+        }
+
+        // Вывод промежуточной телеметрии каждые 20 кадров
+        if frame % 20 == 0 {
+            let frame_us = dt_ns / 1000
+            let instant_fps = if frame_us > 0 { 1000000 / frame_us } else { 9999 }
+            print("  [Кадр #")
+            print(frame)
+            print("] Время кадра: ")
+            print(frame_us)
+            print(" мкс | Текущий FPS: ")
+            println(instant_fps)
+        }
+
+        frame += 1
+    }
+
+    let end_all_ns = aps_time_now_ns()
+    let elapsed_total_ms = (end_all_ns - start_all_ns) / 1000000
+    let avg_frame_us = (total_time_ns / total_frames) / 1000
+    let avg_fps = if avg_frame_us > 0 { 1000000 / avg_frame_us } else { 9999 }
+    let max_fps = if min_frame_ns > 0 { 1000000000 / min_frame_ns } else { 9999 }
+    let min_fps = if max_frame_ns > 0 { 1000000000 / max_frame_ns } else { 9999 }
+
+    println("==================================================================")
+    println("              ИТОГОВЫЙ ОТЧЁТ ФИЗИЧЕСКОГО ДВИЖКА                   ")
+    println("==================================================================")
+    print("  Всего физических шагов частиц: ")
+    println(particle_count * total_frames)
+    print("  Общее время симуляции (мс)   : ")
+    println(elapsed_total_ms)
+    print("  Среднее время одного кадра   : ")
+    print(avg_frame_us)
+    println(" мкс")
+    print("  СРЕДНИЙ FPS (Frames / Sec)   : ")
+    println(avg_fps)
+    print("  МАКСИМАЛЬНЫЙ ПИКОВЫЙ FPS     : ")
+    println(max_fps)
+    print("  МИНИМАЛЬНЫЙ FPS (1% Low)     : ")
+    println(min_fps)
+    print("  Контрольная сумма энергии    : ")
+    println(total_energy_checksum)
+    println("==================================================================")
+}

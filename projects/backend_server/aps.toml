@@ -1,0 +1,11 @@
+[package]
+name = "aps_backend_server"
+version = "1.0.0"
+authors = ["APS Systems Engineering Team"]
+edition = "2026"
+description = "High-performance REST API Backend Server in APS with AMA Zero-GC Memory Management"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

@@ -1,0 +1,86 @@
+// ============================================================================
+// Файл: 09_structs_and_methods.aps
+// Описание: Объявление структур (`struct`), создание экземпляров, работа с
+// вложенными структурами (`Driver`, `Point`, `Rectangle`) и функции над ними
+// с использованием прав доступа `read`, `write`, `take`.
+// ============================================================================
+
+module structs_demo
+
+// 1. Структура `Driver` из канонической спецификации APS
+struct Driver {
+    id: i64
+    name: String
+    balance: i64
+}
+
+// 2. Геометрические структуры `Point` и `Rectangle`
+struct Point {
+    x: f64
+    y: f64
+}
+
+struct Rectangle {
+    origin: Point
+    width: f64
+    height: f64
+}
+
+// Чтение данных водителя (`read Driver`)
+fn show_driver(driver: read Driver) {
+    print("Водитель #")
+    print(driver.id)
+    print(" (")
+    print(driver.name)
+    print("), баланс: ")
+    println(driver.balance)
+}
+
+// Пополнение баланса водителя (`write Driver`)
+fn add_balance(driver: write Driver, amount: i64) {
+    driver.balance += amount
+}
+
+// Вычисление площади прямоугольника (`read Rectangle`)
+fn rectangle_area(rect: read Rectangle) -> f64 {
+    return rect.width * rect.height
+}
+
+// Перемещение прямоугольника на вектор (dx, dy) (`write Rectangle`)
+fn translate_rectangle(rect: write Rectangle, dx: f64, dy: f64) {
+    rect.origin.x += dx
+    rect.origin.y += dy
+}
+
+fn main() {
+    println("=== Структуры и функции над ними в APS ===")
+
+    // Создание изменяемого экземпляра структуры `Driver`
+    var driver = Driver {
+        id: 1,
+        name: "Alibek",
+        balance: 1000
+    }
+
+    show_driver(read driver)
+    add_balance(write driver, 550)
+    show_driver(read driver)
+
+    // Создание геометрических структур
+    var box_rect = Rectangle {
+        origin: Point { x: 10.0, y: 20.0 },
+        width: 15.5,
+        height: 8.0
+    }
+
+    let area = rectangle_area(read box_rect)
+    print("Площадь прямоугольника: ")
+    println(area)
+
+    translate_rectangle(write box_rect, 5.0, -3.5)
+    print("Новые координаты origin: (")
+    print(box_rect.origin.x)
+    print(", ")
+    print(box_rect.origin.y)
+    println(")")
+}

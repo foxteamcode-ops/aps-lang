@@ -1,0 +1,77 @@
+// ============================================================================
+// Файл: 23_collections_vector_and_hashmap.aps
+// Описание: Стандартные динамические коллекции `Vec<T>` (непрерывный растущий
+// массив) и `HashMap<K, V>` (хэш-таблица с открытой адресацией) под управлением AMA.
+// ============================================================================
+
+module collections_demo
+
+import std.collections
+
+// Вычисление среднего значения элементов вектора по праву чтения `read Vec<i64>`
+fn compute_average(values: read Vec<i64>) -> i64 {
+    if values.len() == 0 {
+        return 0
+    }
+    var sum: i64 = 0
+    for i in 0..values.len() {
+        sum += values.get_copy(i)
+    }
+    return sum / values.len()
+}
+
+fn main() {
+    println("=== Стандартные коллекции Vec<T> и HashMap<K, V> в APS ===")
+
+    // 1. Работа с динамическим массивом `Vec<i64>`
+    var scores = Vec<i64>.with_capacity(8)
+    scores.push(85)
+    scores.push(92)
+    scores.push(78)
+    scores.push(95)
+    scores.push(100)
+
+    print("Количество элементов в Vec<i64>: ")
+    println(scores.len())
+
+    let avg = compute_average(read scores)
+    print("Средний балл: ")
+    println(avg)
+
+    // Извлечение последнего элемента (`Option<i64>`)
+    match scores.pop() {
+        Some(last_val) => {
+            print("Извлечён последний элемент pop(): ")
+            println(last_val)
+        }
+        None => println("Вектор пуст")
+    }
+
+    // 2. Работа с хэш-таблицей `HashMap<String, i64>`
+    var balances = HashMap<String, i64>.new()
+    balances.insert("Alibek", 1500)
+    balances.insert("Aidar", 2300)
+    balances.insert("Madina", 3100)
+
+    // Обновление существующего ключа
+    balances.insert("Alibek", 1850)
+
+    print("Размер таблицы balances: ")
+    println(balances.len())
+
+    // Безопасный поиск по ключу через `Option<i64>`
+    match balances.get("Alibek") {
+        Some(amount) => {
+            print("Баланс пользователя Alibek: ")
+            println(amount)
+        }
+        None => println("Пользователь Alibek не найден")
+    }
+
+    match balances.get("UnknownUser") {
+        Some(amount) => println(amount),
+        None => println("Ключ 'UnknownUser' отсутствует в HashMap (получен None)")
+    }
+    // При выходе из `main` память `scores` и `balances` автоматически
+    // освобождается механизмом AMA (Single-Owner Heap CTFP).
+}

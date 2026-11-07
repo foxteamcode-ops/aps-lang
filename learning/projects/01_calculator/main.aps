@@ -1,0 +1,1 @@
+fn calculate(a: i64, b: i64, op: String) -> i64 { if op == "+" { a + b } else if op == "*" { a * b } else { a - b } } fn main() { let r = calculate(10, 20, "*"); println(r) }

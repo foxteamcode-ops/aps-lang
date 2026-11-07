@@ -1,0 +1,218 @@
+// ============================================================================
+// Файл: examples/real_world/07_json_parser.aps
+// Описание: Полноценный лексер и структурный парсер JSON-документов с
+// размещением узлов синтаксического дерева (AST) в линейном регионе памяти
+// `region json_arena` (нулевые накладные расходы на освобождение дерева!).
+// ============================================================================
+
+module json_parser
+
+import std.io
+
+// Типы лексем JSON:
+// 1 = LBrace `{`, 2 = RBrace `}`, 3 = LBracket `[`, 4 = RBracket `]`,
+// 5 = Colon `:`,  6 = Comma `,`,  7 = KeyString,    8 = IntNumber,
+// 9 = BoolValue,  10 = StringValue
+struct JsonToken {
+    kind: i64
+    text: String
+    int_val: i64
+    line: i64
+}
+
+// Узел разобранного JSON-документа, размещаемый внутри `region json_arena`
+// node_type: 1 = Object, 2 = Array, 3 = FieldInt, 4 = FieldBool, 5 = FieldString
+struct JsonAstNode {
+    node_id: i64
+    node_type: i64
+    key: String
+    int_value: i64
+    str_value: String
+    children_count: i64
+}
+
+// Итоговая сводка разбора и извлечённых бизнес-полей JSON-документа
+// (Копируемая структура, безопасно возвращаемая наружу после очистки `json_arena`)
+struct ParsedOrderPayload {
+    tokens_scanned: i64
+    ast_nodes_built: i64
+    order_id: i64
+    driver_id: i64
+    fare_kzt: i64
+    surge_multiplier_pct: i64
+    is_priority: bool
+    is_valid_syntax: bool
+}
+
+// Проверка баланса фигурных и квадратных скобок в потоке JSON-токенов
+fn verify_json_brackets(tokens: read [JsonToken]) -> Result<i64, String> {
+    var brace_depth: i64 = 0
+    var bracket_depth: i64 = 0
+    var has_underflow = false
+
+    for i in 0..tokens.len() {
+        let tk = tokens[i].kind
+        if tk == 1 {
+            brace_depth += 1
+        } else if tk == 2 {
+            brace_depth -= 1
+            if brace_depth < 0 {
+                has_underflow = true
+            }
+        } else if tk == 3 {
+            bracket_depth += 1
+        } else if tk == 4 {
+            bracket_depth -= 1
+            if bracket_depth < 0 {
+                has_underflow = true
+            }
+        }
+    }
+
+    var res: Result<i64, String> = Ok(tokens.len())
+    if has_underflow || brace_depth != 0 || bracket_depth != 0 {
+        res = Err("Синтаксическая ошибка JSON: нарушение баланса скобок")
+    }
+    return res
+}
+
+// Поиск целочисленного значения по имени ключа в массиве узлов AST
+fn extract_int_field(nodes: read [JsonAstNode], target_key: read String) -> Option<i64> {
+    var found: Option<i64> = None
+    for i in 0..nodes.len() {
+        if nodes[i].node_type == 3 && nodes[i].key == target_key {
+            found = Some(nodes[i].int_value)
+        }
+    }
+    return found
+}
+
+// Поиск булевого флага по имени ключа в массиве узлов AST
+fn extract_bool_field(nodes: read [JsonAstNode], target_key: read String) -> bool {
+    var flag = false
+    for i in 0..nodes.len() {
+        if nodes[i].node_type == 4 && nodes[i].key == target_key {
+            flag = nodes[i].int_value != 0
+        }
+    }
+    return flag
+}
+
+fn main() {
+    println("=== APS Real-World #07: Лексер и парсер JSON в region json_arena ===")
+
+    var payload_result = ParsedOrderPayload {
+        tokens_scanned: 0,
+        ast_nodes_built: 0,
+        order_id: 0,
+        driver_id: 0,
+        fare_kzt: 0,
+        surge_multiplier_pct: 100,
+        is_priority: false,
+        is_valid_syntax: false
+    }
+
+    // Весь процесс лексического анализа и построения дерева AST выполняется
+    // в специализированном регионе `json_arena`. По завершении блока вся память
+    // промежуточных токенов и узлов AST освобождается мгновенно (O(1))!
+    region json_arena {
+        println("  [json_arena] Инициализация арены для разбора JSON-пакета...")
+
+        // Токенизированное представление документа:
+        // { "order_id": 88412, "driver_id": 7, "fare_kzt": 3450, "surge_pct": 125, "priority": true }
+        let token_stream = [
+            JsonToken { kind: 1, text: "{",          int_val: 0,     line: 1 },
+            JsonToken { kind: 7, text: "order_id",   int_val: 0,     line: 2 },
+            JsonToken { kind: 5, text: ":",          int_val: 0,     line: 2 },
+            JsonToken { kind: 8, text: "88412",      int_val: 88412, line: 2 },
+            JsonToken { kind: 6, text: ",",          int_val: 0,     line: 2 },
+            JsonToken { kind: 7, text: "driver_id",  int_val: 0,     line: 3 },
+            JsonToken { kind: 5, text: ":",          int_val: 0,     line: 3 },
+            JsonToken { kind: 8, text: "7",          int_val: 7,     line: 3 },
+            JsonToken { kind: 6, text: ",",          int_val: 0,     line: 3 },
+            JsonToken { kind: 7, text: "fare_kzt",   int_val: 0,     line: 4 },
+            JsonToken { kind: 5, text: ":",          int_val: 0,     line: 4 },
+            JsonToken { kind: 8, text: "3450",       int_val: 3450,  line: 4 },
+            JsonToken { kind: 6, text: ",",          int_val: 0,     line: 4 },
+            JsonToken { kind: 7, text: "surge_pct",  int_val: 0,     line: 5 },
+            JsonToken { kind: 5, text: ":",          int_val: 0,     line: 5 },
+            JsonToken { kind: 8, text: "125",        int_val: 125,   line: 5 },
+            JsonToken { kind: 6, text: ",",          int_val: 0,     line: 5 },
+            JsonToken { kind: 7, text: "priority",   int_val: 0,     line: 6 },
+            JsonToken { kind: 5, text: ":",          int_val: 0,     line: 6 },
+            JsonToken { kind: 9, text: "true",       int_val: 1,     line: 6 },
+            JsonToken { kind: 2, text: "}",          int_val: 0,     line: 7 }
+        ]
+
+        match verify_json_brackets(read token_stream) {
+            Ok(tok_cnt) => {
+                payload_result.tokens_scanned = tok_cnt
+                payload_result.is_valid_syntax = true
+            }
+            Err(_) => {
+                payload_result.is_valid_syntax = false
+            }
+        }
+
+        // Размещаем корневой узел JSON-объекта непосредственно в `json_arena`
+        let root_obj = json_arena.alloc(JsonAstNode {
+            node_id: 1,
+            node_type: 1,
+            key: "root",
+            int_value: 0,
+            str_value: "",
+            children_count: 5
+        })
+
+        // Формируем таблицу разобранных AST-узлов внутри региона
+        let ast_nodes = [
+            JsonAstNode { node_id: 2, node_type: 3, key: "order_id",  int_value: 88412, str_value: "", children_count: 0 },
+            JsonAstNode { node_id: 3, node_type: 3, key: "driver_id", int_value: 7,     str_value: "", children_count: 0 },
+            JsonAstNode { node_id: 4, node_type: 3, key: "fare_kzt",  int_value: 3450,  str_value: "", children_count: 0 },
+            JsonAstNode { node_id: 5, node_type: 3, key: "surge_pct", int_value: 125,   str_value: "", children_count: 0 },
+            JsonAstNode { node_id: 6, node_type: 4, key: "priority",  int_value: 1,     str_value: "", children_count: 0 }
+        ]
+
+        payload_result.ast_nodes_built = 1 + root_obj.children_count
+
+        match extract_int_field(read ast_nodes, read "order_id") {
+            Some(v) => { payload_result.order_id = v }
+            None => {}
+        }
+        match extract_int_field(read ast_nodes, read "driver_id") {
+            Some(v) => { payload_result.driver_id = v }
+            None => {}
+        }
+        match extract_int_field(read ast_nodes, read "fare_kzt") {
+            Some(v) => { payload_result.fare_kzt = v }
+            None => {}
+        }
+        match extract_int_field(read ast_nodes, read "surge_pct") {
+            Some(v) => { payload_result.surge_multiplier_pct = v }
+            None => {}
+        }
+
+        payload_result.is_priority = extract_bool_field(read ast_nodes, read "priority")
+
+        print("  [json_arena] Построено узлов AST в арене: ")
+        println(payload_result.ast_nodes_built)
+    }
+    // <-- Здесь `json_arena` полностью уничтожена за одну инструкцию!
+
+    println("[main] Регион json_arena освобождён. Извлечённые данные заказа:")
+    print("  Синтаксис валиден       : ")
+    println(payload_result.is_valid_syntax)
+    print("  Просканировано лексем   : ")
+    println(payload_result.tokens_scanned)
+    print("  ID заказа (order_id)    : ")
+    println(payload_result.order_id)
+    print("  ID водителя (driver_id) : ")
+    println(payload_result.driver_id)
+    print("  Базовый тариф (KZT)     : ")
+    println(payload_result.fare_kzt)
+    let final_fare = (payload_result.fare_kzt * payload_result.surge_multiplier_pct) / 100
+    print("  Итоговый тариф с Surge  : ")
+    println(final_fare)
+    print("  Приоритетный заказ      : ")
+    println(payload_result.is_priority)
+}

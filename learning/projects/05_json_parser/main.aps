@@ -1,0 +1,1 @@
+struct JsonVal { tag: i64, num: i64 } fn main() { region json_arena { let node = json_arena.alloc(JsonVal { tag: 1, num: 2026 }); println(node.num) } }

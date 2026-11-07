@@ -1,0 +1,74 @@
+// ============================================================================
+// Файл: examples/real_world/10_multimodule_enterprise_app/src/repository.aps
+// Описание: Модуль слоя хранения данных (`module repository`) с индексацией,
+// проверкой квот хранилища и ведением журнала транзакций.
+// ============================================================================
+
+module repository
+
+import domain
+
+pub struct DriverRecord {
+    pub id: i64
+    pub name: String
+    pub balance: i64
+    pub trips_count: i64
+}
+
+pub struct FleetRepository {
+    pub repo_name: String
+    pub total_drivers: i64
+    pub total_invoices_stored: i64
+    pub total_volume_kzt: i64
+    pub write_ops: i64
+}
+
+pub fn new_repository(name: String) -> FleetRepository {
+    return FleetRepository {
+        repo_name: name,
+        total_drivers: 0,
+        total_invoices_stored: 0,
+        total_volume_kzt: 0,
+        write_ops: 0
+    }
+}
+
+pub fn register_driver_in_repo(
+    repo: write FleetRepository,
+    rec: read DriverRecord
+) -> Result<i64, String> {
+    var res: Result<i64, String> = Err("Недопустимый первичный ключ записи водителя")
+    if rec.id > 0 {
+        repo.total_drivers += 1
+        repo.write_ops += 1
+        res = Ok(repo.total_drivers)
+    }
+    return res
+}
+
+pub fn record_invoice_settlement(
+    repo: write FleetRepository,
+    gross_amount: i64
+) -> Result<i64, String> {
+    var res: Result<i64, String> = Err("Сумма счёта должна быть положительной")
+    if gross_amount > 0 {
+        repo.total_invoices_stored += 1
+        repo.total_volume_kzt += gross_amount
+        repo.write_ops += 1
+        res = Ok(repo.total_invoices_stored)
+    }
+    return res
+}
+
+pub fn find_driver_balance(
+    records: read [DriverRecord],
+    search_id: i64
+) -> Option<i64> {
+    var found: Option<i64> = None
+    for i in 0..records.len() {
+        if records[i].id == search_id {
+            found = Some(records[i].balance)
+        }
+    }
+    return found
+}

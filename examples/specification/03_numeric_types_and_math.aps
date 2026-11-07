@@ -1,0 +1,103 @@
+// ============================================================================
+// Файл: 03_numeric_types_and_math.aps
+// Описание: Целочисленные типы (`i8`..`i64`, `u8`..`u64`), числа с плавающей
+// точкой (`f32`, `f64`), арифметические и побитовые операции, строгое явное
+// приведение типов через оператор `as`.
+// ============================================================================
+
+module numeric_demo
+
+fn compute_kinetic_energy(mass_kg: f64, velocity_ms: f64) -> f64 {
+    return 0.5 * mass_kg * (velocity_ms * velocity_ms)
+}
+
+fn main() {
+    println("=== Числовые типы и математические операции в APS ===")
+
+    // 1. Знаковые целые типы фиксированной разрядности
+    let tiny_int: i8 = -120
+    let small_int: i16 = -32000
+    let normal_int: i32 = 1_000_000
+    let big_int: i64 = 9_000_000_000_000
+
+    // 2. Беззнаковые целые типы
+    let byte_val: u8 = 250
+    let port_num: u16 = 8080
+    let flags: u32 = 0xFF00_00FF
+    let total_ticks: u64 = 18_446_744_073_709_551_000
+
+    // 3. Числа с плавающей точкой (IEEE 754)
+    let sensor_temp: f32 = 36.6
+    let orbital_speed: f64 = 7800.125
+
+    print("tiny_int (i8) = ")
+    print(tiny_int)
+    print(", port_num (u16) = ")
+    print(port_num)
+    print(", big_int (i64) = ")
+    println(big_int)
+
+    // 4. Базовая целочисленная арифметика
+    let a: i64 = 107
+    let b: i64 = 10
+    let sum = a + b
+    let diff = a - b
+    let prod = a * b
+    let quot = a / b
+    let rem = a % b
+
+    print("107 и 10 -> sum=")
+    print(sum)
+    print(", diff=")
+    print(diff)
+    print(", prod=")
+    print(prod)
+    print(", quot=")
+    print(quot)
+    print(", rem=")
+    println(rem)
+
+    // 5. Побитовые операции
+    let mask_a: u32 = 0b1100_1010
+    let mask_b: u32 = 0b1010_1100
+    let bit_and = mask_a & mask_b
+    let bit_or  = mask_a | mask_b
+    let bit_xor = mask_a ^ mask_b
+    let shifted_left = mask_a << 2
+    let shifted_right = mask_b >> 1
+
+    print("Побитовые результаты: AND=")
+    print(bit_and)
+    print(", OR=")
+    print(bit_or)
+    print(", XOR=")
+    print(bit_xor)
+    print(", SHL=")
+    print(shifted_left)
+    print(", SHR=")
+    println(shifted_right)
+
+    // 6. Явное приведение типов (`as`)
+    // В APS запрещены неявные сужающие или межтиповые конверсии!
+    let widened_i64: i64 = (normal_int as i64) + big_int
+    let float_from_int: f64 = (a as f64) / (b as f64)
+    let truncated_int: i64 = float_from_int as i64
+
+    print("widened_i64 = ")
+    print(widened_i64)
+    print(", точное деление f64 = ")
+    print(float_from_int)
+    print(", усечение обратно в i64 = ")
+    println(truncated_int)
+
+    // Вычисление кинетической энергии
+    let energy = compute_kinetic_energy(sensor_temp as f64, orbital_speed)
+    print("Кинетическая энергия (Дж): ")
+    println(energy)
+    print("Всего тактов (u64): ")
+    print(total_ticks)
+    print(", small_int (i16): ")
+    print(small_int)
+    print(", byte (u8): ")
+    println(byte_val)
+}

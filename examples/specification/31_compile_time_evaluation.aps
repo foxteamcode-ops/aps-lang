@@ -1,0 +1,65 @@
+// ============================================================================
+// Файл: 31_compile_time_evaluation.aps
+// Описание: Вычисления на этапе компиляции (`const fn` и блоки `comptime`).
+// Позволяют генерировать таблицы предрасчёта, маски, хэши и константы
+// напрямую внутри компилятора APS с нулевыми затратами в рантайме (Zero Runtime Cost).
+// ============================================================================
+
+module comptime_demo
+
+// Функция, помеченная `const fn`, может вызываться как на этапе компиляции
+// (для инициализации `const`), так и в обычном рантайме.
+const fn compute_cache_line_aligned_size(raw_size: i64, alignment: i64) -> i64 {
+    let remainder = raw_size % alignment
+    if remainder == 0 {
+        return raw_size
+    }
+    return raw_size + (alignment - remainder)
+}
+
+// Вычисление степени двойки на этапе компиляции
+const fn pow2(exp: i64) -> i64 {
+    var result: i64 = 1
+    var i: i64 = 0
+    while i < exp {
+        result = result * 2
+        i += 1
+    }
+    return result
+}
+
+// Вычисление контрольной суммы FNV-1a для идентификаторов протокола на этапе компиляции
+const fn fnv1a_hash_u64(seed: u64, value: u64) -> u64 {
+    let fnv_offset: u64 = 14695981039346656037
+    let fnv_prime: u64  = 1099511628211
+    let mixed = (fnv_offset ^ seed ^ value) * fnv_prime
+    return mixed
+}
+
+// Константы, полностью вычисленные компилятором до генерации машинного кода:
+const CACHE_LINE_BYTES: i64 = 64
+const PACKET_BUFFER_SIZE: i64 = compute_cache_line_aligned_size(210, CACHE_LINE_BYTES)
+const RING_BUFFER_CAPACITY: i64 = pow2(12)
+const PROTOCOL_MAGIC_HASH: u64 = fnv1a_hash_u64(0xA950_0001, 2026)
+
+fn main() {
+    println("=== Вычисления на этапе компиляции (const fn / comptime) в APS ===")
+
+    print("Размер кэш-линии процессора (байт): ")
+    println(CACHE_LINE_BYTES)
+
+    print("Выровненный размер буфера пакета (для 210 байт -> кратно 64): ")
+    println(PACKET_BUFFER_SIZE)
+
+    print("Ёмкость кольцевого буфера pow2(12): ")
+    println(RING_BUFFER_CAPACITY)
+
+    print("Предвычисленный магический хэш протокола: ")
+    println(PROTOCOL_MAGIC_HASH)
+
+    // Вызов той же `const fn` в рантайме для динамических данных
+    let dynamic_payload = 500
+    let runtime_aligned = compute_cache_line_aligned_size(dynamic_payload, CACHE_LINE_BYTES)
+    print("Выравнивание в рантайме для 500 байт: ")
+    println(runtime_aligned)
+}

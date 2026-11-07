@@ -1,0 +1,83 @@
+// ============================================================================
+// Файл: 11_generics_and_constraints.aps
+// Описание: Обобщённое программирование (Generics) в APS: параметризованные
+// структуры `Pair<T>`, `KeyValue<K, V>`, обобщённые функции с мономорфизацией
+// на этапе компиляции (Zero-Cost Abstractions).
+// ============================================================================
+
+module generics_demo
+
+// Обобщённая структура пары однотипных значений
+struct Pair<T> {
+    first: T
+    second: T
+}
+
+// Обобщённая структура ключ-значение с двумя типовыми параметрами
+struct KeyValue<K, V> {
+    key: K
+    value: V
+}
+
+// Обобщённая функция выбора максимума из двух сравнимых значений
+fn max_val<T>(a: T, b: T) -> T {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+// Обобщённая функция выбора минимума
+fn min_val<T>(a: T, b: T) -> T {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+// Обмен элементов внутри `Pair<T>` через эксклюзивное право записи `write`
+fn swap_pair<T>(pair: write Pair<T>) {
+    let temp = pair.first
+    pair.first = pair.second
+    pair.second = temp
+}
+
+fn main() {
+    println("=== Обобщённые типы (Generics) и мономорфизация в APS ===")
+
+    // 1. Использование `max_val<T>` и `min_val<T>` для `i64` и `f64`
+    let best_int = max_val<i64>(1024, 2048)
+    let low_float = min_val<f64>(3.14, 2.71)
+
+    print("max_val<i64>(1024, 2048) = ")
+    println(best_int)
+    print("min_val<f64>(3.14, 2.71) = ")
+    println(low_float)
+
+    // 2. Создание и модификация обобщённой структуры `Pair<i64>`
+    var coords = Pair<i64> {
+        first: 100,
+        second: 500
+    }
+    print("До обмена: first = ")
+    print(coords.first)
+    print(", second = ")
+    println(coords.second)
+
+    swap_pair<i64>(write coords)
+
+    print("После обмена: first = ")
+    print(coords.first)
+    print(", second = ")
+    println(coords.second)
+
+    // 3. Обобщённая структура `KeyValue<String, i64>`
+    let metric = KeyValue<String, i64> {
+        key: "requests_per_second",
+        value: 145000
+    }
+    print("Метрика [")
+    print(metric.key)
+    print("] = ")
+    println(metric.value)
+}

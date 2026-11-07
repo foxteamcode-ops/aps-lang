@@ -1,0 +1,82 @@
+// ============================================================================
+// Файл: examples/real_world/10_multimodule_enterprise_app/src/domain.aps
+// Описание: Доменный модуль (`module domain`) корпоративной системы управления
+// автопарком и финансовыми расчётами (`Driver`, `FleetVehicle`, `TripInvoice`).
+// ============================================================================
+
+module domain
+
+pub const CORPORATE_TAX_BPS: i64 = 1200 // 12.00% НДС в базисных пунктах
+pub const PLATFORM_COMMISSION_BPS: i64 = 1000 // 10.00% комиссия автопарка
+
+pub struct Driver {
+    pub id: i64
+    pub name: String
+    pub balance: i64
+    pub rating_bps: i64
+    pub active: bool
+}
+
+pub struct FleetVehicle {
+    pub vehicle_id: i64
+    pub plate_number: String
+    pub mileage_km: i64
+    pub assigned_driver_id: i64
+}
+
+pub struct TripInvoice {
+    pub invoice_id: i64
+    pub driver_id: i64
+    pub distance_km: i64
+    pub gross_amount: i64
+    pub tax_amount: i64
+    pub net_payout: i64
+}
+
+pub fn create_driver(id: i64, name: String, initial_balance: i64) -> Driver {
+    return Driver {
+        id: id,
+        name: name,
+        balance: initial_balance,
+        rating_bps: 500,
+        active: true
+    }
+}
+
+pub fn compute_trip_invoice(
+    invoice_id: i64,
+    driver_id: i64,
+    distance_km: i64,
+    rate_per_km: i64
+) -> Result<TripInvoice, String> {
+    let gross = distance_km * rate_per_km
+    let tax = (gross * CORPORATE_TAX_BPS) / 10000
+    let fee = (gross * PLATFORM_COMMISSION_BPS) / 10000
+    let net = gross - tax - fee
+
+    let inv = TripInvoice {
+        invoice_id: invoice_id,
+        driver_id: driver_id,
+        distance_km: distance_km,
+        gross_amount: gross,
+        tax_amount: tax,
+        net_payout: net
+    }
+
+    var res: Result<TripInvoice, String> = Ok(inv)
+    if distance_km <= 0 || rate_per_km <= 0 {
+        res = Err("Дистанция и тариф поездки должны быть строго положительными")
+    }
+    return res
+}
+
+pub fn print_driver_card(driver: read Driver) {
+    print("  [Domain Driver #")
+    print(driver.id)
+    print("] ")
+    print(driver.name)
+    print(" | Баланс: ")
+    print(driver.balance)
+    print(" KZT | Рейтинг: ")
+    println(driver.rating_bps)
+}

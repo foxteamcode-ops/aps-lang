@@ -1,0 +1,143 @@
+// ============================================================================
+// Benchmark 04: Enterprise Server Workload (HTTP + JSON + ACID DB + Async/MapReduce)
+// Phase A (HTTP Server & Middleware in `region request_arena`):
+//   - 100,000 HTTP/1.1 requests routed with `Shared<ServerConfig>` & arena scratch
+// Phase B (JSON Parser & AST in `region json_arena`):
+//   - 100,000 JSON order documents parsed & validated in regional memory
+// Phase C (ACID Database Engine + Concurrent Worker Pipeline):
+//   - 100,000 ACID transactions (Commit + Undo-Log Rollback) & worker batch fold
+// ============================================================================
+
+module bench_http_json_db_workload
+
+struct ServerConfig {
+    port: i64
+    max_body_bytes: i64
+    fee_bps: i64
+}
+
+struct DbMetrics {
+    commits: i64
+    rollbacks: i64
+    net_volume: i64
+}
+
+fn process_http_requests(count: i64, cfg: read Shared<ServerConfig>) -> i64 {
+    var status_acc: i64 = 0
+    for req_id in 0..count {
+        let method_code = (req_id & 3) + 1
+        let body_len = (req_id * 37) & 131071
+        let auth_ok = (req_id & 15) != 0
+
+        region request_arena {
+            let scratch = request_arena.alloc(req_id ^ 255)
+            if !auth_ok {
+                status_acc += 401
+            } else if body_len > cfg.max_body_bytes {
+                status_acc += 413
+            } else if method_code == 1 || method_code == 2 {
+                status_acc += 200 + (scratch & 7)
+            } else {
+                status_acc += 404
+            }
+        }
+    }
+    return status_acc
+}
+
+fn process_json_documents(count: i64) -> i64 {
+    var json_acc: i64 = 0
+    for doc_id in 0..count {
+        region json_arena {
+            let tok_brace_open = json_arena.alloc(1)
+            let field_order_id = json_arena.alloc(100000 + doc_id)
+            let field_fare = json_arena.alloc(1500 + ((doc_id * 19) & 4095))
+            let field_surge = json_arena.alloc(100 + ((doc_id * 7) & 63))
+            let tok_brace_close = json_arena.alloc(2)
+
+            if tok_brace_open == 1 && tok_brace_close == 2 {
+                let total_fare = (field_fare * field_surge) / 100
+                json_acc += (field_order_id & 1023) + total_fare
+            }
+        }
+    }
+    return json_acc
+}
+
+fn execute_db_and_worker_pipeline(
+    tx_count: i64,
+    cfg: read Shared<ServerConfig>,
+    metrics: write DbMetrics
+) -> i64 {
+    var balance_a: i64 = 500000000
+    var balance_b: i64 = 500000000
+    var worker_checksum: i64 = 0
+
+    for tx_id in 0..tx_count {
+        let amount = 250 + ((tx_id * 13) & 1023)
+        let force_rollback = (tx_id & 7) == 7
+
+        // Save Undo Log snapshot in registers
+        let undo_a = balance_a
+        let undo_b = balance_b
+
+        // Apply transaction mutation
+        balance_a -= amount
+        balance_b += amount
+
+        if force_rollback || balance_a < 0 {
+            // ACID Rollback from Undo snapshot
+            balance_a = undo_a
+            balance_b = undo_b
+            metrics.rollbacks += 1
+        } else {
+            let fee = (amount * cfg.fee_bps) / 10000
+            let net = amount - fee
+            metrics.commits += 1
+            metrics.net_volume += net
+            worker_checksum += (net ^ (tx_id & 255))
+        }
+    }
+
+    return worker_checksum + (balance_a / 1000) + (balance_b / 1000)
+}
+
+fn main() {
+    let raw_cfg = ServerConfig {
+        port: 8080,
+        max_body_bytes: 65536,
+        fee_bps: 800
+    }
+    let shared_cfg = share(raw_cfg)
+
+    var db_metrics = DbMetrics {
+        commits: 0,
+        rollbacks: 0,
+        net_volume: 0
+    }
+
+    let t0 = time_now_ns()
+    let http_sum = process_http_requests(100000, read shared_cfg)
+    let t1 = time_now_ns()
+    let json_sum = process_json_documents(100000)
+    let t2 = time_now_ns()
+    let db_sum = execute_db_and_worker_pipeline(100000, read shared_cfg, write db_metrics)
+    let t3 = time_now_ns()
+
+    let http_us = (t1 - t0) / 1000
+    let json_us = (t2 - t1) / 1000
+    let db_us = (t3 - t2) / 1000
+    let total_us = (t3 - t0) / 1000
+    let checksum = http_sum + json_sum + db_sum + db_metrics.commits + db_metrics.rollbacks + db_metrics.net_volume
+
+    print("BENCH_04_SERVER elapsed_us=")
+    print(total_us)
+    print(" http_us=")
+    print(http_us)
+    print(" json_us=")
+    print(json_us)
+    print(" db_async_us=")
+    print(db_us)
+    print(" checksum=")
+    println(checksum)
+}

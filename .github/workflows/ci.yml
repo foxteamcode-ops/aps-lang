@@ -1,0 +1,46 @@
+name: APS Compiler & Ecosystem CI/CD
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  build-and-test:
+    name: Build & Verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify LLVM clang availability
+        shell: bash
+        run: clang --version
+
+      - name: Build APS compiler, apm, and aps-lsp
+        run: cargo build --release
+
+      - name: Run Rust unit & AMA memory safety integration tests
+        run: cargo test --all-targets
+
+      - name: Verify all 32 Specification Examples
+        run: cargo run --bin aps -- test examples/specification
+
+      - name: Verify APS Standard Library (17 modules)
+        run: cargo run --bin aps -- test std
+
+      - name: Verify Real-World Applications
+        run: cargo run --bin aps -- test examples/real_world
+
+      - name: Execute native binary smoke test
+        run: cargo run --bin aps -- run examples/specification/01_hello_world.aps

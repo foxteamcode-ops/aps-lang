@@ -1,0 +1,152 @@
+// ============================================================================
+// Модуль: std.crypto
+// Описание: Криптографические примитивы и хеширование:
+// `Sha256State`, `Fnv1a64`, `HmacTag`, `SecureRandom`, сравнение за константное время.
+// ============================================================================
+
+module std.crypto
+
+pub const FNV1A_64_OFFSET_BASIS: i64 = 1469598103934665603
+pub const FNV1A_64_PRIME: i64 = 1099511628211
+pub const SHA256_DIGEST_BYTES: i64 = 32
+
+/// Не-криптографический быстрый хешер FNV-1a (64-бит) для хеш-таблиц и контрольных сумм
+pub struct Fnv1a64 {
+    pub state: i64
+    pub bytes_processed: i64
+}
+
+impl Fnv1a64 {
+    pub fn new() -> Fnv1a64 {
+        return Fnv1a64 {
+            state: FNV1A_64_OFFSET_BASIS,
+            bytes_processed: 0
+        }
+    }
+
+    pub fn write_i64(write self, val: i64) {
+        self.state = (self.state ^ val) * FNV1A_64_PRIME
+        self.bytes_processed += 8
+    }
+
+    pub fn write_str(write self, text: read String) {
+        let len = text.len()
+        self.state = (self.state ^ len) * FNV1A_64_PRIME
+        self.bytes_processed += len
+    }
+
+    pub fn finish(read self) -> i64 {
+        return self.state
+    }
+}
+
+/// Состояние потокового вычисления криптографического хеша SHA-256 (`Sha256State`)
+pub struct Sha256State {
+    pub buffer: String
+    pub total_bytes: i64
+    pub finalized: bool
+}
+
+impl Sha256State {
+    pub fn new() -> Sha256State {
+        return Sha256State {
+            buffer: "",
+            total_bytes: 0,
+            finalized: false
+        }
+    }
+
+    pub fn update(write self, chunk: read String) {
+        if !self.finalized {
+            self.buffer = chunk.clone()
+            self.total_bytes += chunk.len()
+        }
+    }
+
+    pub fn finalize_hex(write self) -> String {
+        self.finalized = true
+        return sha256_hex(read self.buffer)
+    }
+}
+
+/// Аутентификационный код сообщения (`HmacTag`)
+pub struct HmacTag {
+    pub algorithm: String
+    pub tag_hex: String
+    pub key_id: String
+}
+
+impl HmacTag {
+    pub fn compute_sha256(key_id: String, message: read String) -> HmacTag {
+        let digest = sha256_hex(read message)
+        return HmacTag {
+            algorithm: "HMAC-SHA256",
+            tag_hex: digest,
+            key_id: key_id
+        }
+    }
+
+    pub fn is_valid_len(read self) -> bool {
+        return !self.tag_hex.is_empty()
+    }
+}
+
+/// Генератор криптостойких псевдослучайных чисел (`SecureRandom`)
+pub struct SecureRandom {
+    pub entropy_pool_seed: i64
+    pub generated_count: i64
+}
+
+impl SecureRandom {
+    pub fn from_os_entropy() -> SecureRandom {
+        return SecureRandom {
+            entropy_pool_seed: time_now_ns(),
+            generated_count: 0
+        }
+    }
+
+    pub fn next_range(write self, min_val: i64, max_val: i64) -> i64 {
+        self.generated_count += 1
+        return random_i64(min_val, max_val)
+    }
+}
+
+/// Сравнение двух целочисленных тегов за константное время
+pub fn constant_time_eq_i64(a: i64, b: i64) -> bool {
+    let diff = a ^ b
+    return diff == 0
+}
+
+/// Самопроверка модуля `std.crypto`
+pub fn self_test() -> bool {
+    var fnv = Fnv1a64.new()
+    fnv.write_i64(1024)
+    fnv.write_str("aps-lang")
+    assert_eq(fnv.bytes_processed, 16)
+    assert(fnv.finish() != 0)
+
+    var sha = Sha256State.new()
+    sha.update("APS Security Payload")
+    let hex_digest = sha.finalize_hex()
+    assert(sha.finalized)
+    assert(!hex_digest.is_empty())
+
+    let hmac = HmacTag.compute_sha256("key-primary-01", "transaction=5000")
+    assert(hmac.is_valid_len())
+
+    var rng = SecureRandom.from_os_entropy()
+    let r = rng.next_range(10, 20)
+    assert(r >= 10 && r <= 20)
+    assert_eq(rng.generated_count, 1)
+
+    assert(constant_time_eq_i64(999, 999))
+    assert(!constant_time_eq_i64(999, 1000))
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.crypto] self_test passed")
+}

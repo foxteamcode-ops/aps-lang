@@ -1,0 +1,72 @@
+// ============================================================================
+// Файл: 27_mutex_and_atomic_sync.aps
+// Описание: Синхронизация разделяемого изменяемого состояния между потоками
+// с помощью `Mutex<T>` (защита данных внутри самого контейнера мьютекса)
+// и аппаратных атомарных примитивов `AtomicI64`.
+// ============================================================================
+
+module sync_mutex_atomic_demo
+
+import std.sync
+import std.thread
+
+struct LedgerSummary {
+    transaction_count: i64
+    total_volume: i64
+}
+
+// Запись транзакции через захват мьютекса `Mutex<LedgerSummary>`
+fn record_safe_transaction(
+    shared_ledger: read Shared<Mutex<LedgerSummary>>,
+    atomic_seq: read Shared<AtomicI64>,
+    amount: i64
+) {
+    // 1. Атомарный инкремент без блокировок (lock-free fetch_add с порядком SeqCst)
+    let seq_num = atomic_seq.fetch_add(1)
+
+    // 2. Захват мьютекса предоставляет эксклюзивный доступ к данным внутри критической секции
+    var guard = shared_ledger.lock()
+    defer {
+        guard.unlock()
+    }
+
+    guard.transaction_count += 1
+    guard.total_volume += amount
+
+    print("  Транзакция #")
+    print(seq_num)
+    print(" зафиксирована: +")
+    println(amount)
+}
+
+fn main() {
+    println("=== Синхронизация: Mutex<T> и AtomicI64 в APS ===")
+
+    // Оборачиваем `Mutex<LedgerSummary>` в `share(...)` для безопасного разделения между потоками
+    let initial_ledger = LedgerSummary {
+        transaction_count: 0,
+        total_volume: 0
+    }
+    let shared_ledger = share(Mutex.new(take initial_ledger))
+
+    // Атомарный счётчик порядковых номеров операций
+    let atomic_seq = share(AtomicI64.new(1))
+
+    // Выполняем серию защищённых операций
+    record_safe_transaction(read shared_ledger, read atomic_seq, 1000)
+    record_safe_transaction(read shared_ledger, read atomic_seq, 2500)
+    record_safe_transaction(read shared_ledger, read atomic_seq, 4000)
+
+    // Читаем финальное состояние под защитой мьютекса
+    var final_guard = shared_ledger.lock()
+    defer {
+        final_guard.unlock()
+    }
+
+    print("Всего проведено транзакций: ")
+    println(final_guard.transaction_count)
+    print("Общий объём средств: ")
+    println(final_guard.total_volume)
+    print("Следующий атомарный индекс: ")
+    println(atomic_seq.load())
+}

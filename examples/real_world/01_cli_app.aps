@@ -1,0 +1,257 @@
+// ============================================================================
+// Файл: examples/real_world/01_cli_app.aps
+// Описание: Полноценное CLI-приложение (`aps-audit-cli`) — парсер аргументов
+// и флагов командной строки, валидация профилей конфигурации, расчёт метрик
+// кластера и генерация сводного отчёта.
+// Демонстрирует: структуры данных, перечисления, права доступа `read`/`write`/`take`,
+// `region`, `Option<T>`, `Result<T, E>`, `defer` и детерминированный вывод.
+// ============================================================================
+
+module cli_app
+
+import std.io
+import std.env
+
+// Режим форматирования выходного отчёта
+enum OutputFormat {
+    TextTable
+    JsonCompact
+    CsvReport
+}
+
+// Структура разобранного аргумента командной строки
+struct CliToken {
+    flag_name: String
+    value_str: String
+    numeric_val: i64
+    is_flag: bool
+}
+
+// Итоговая типизированная конфигурация CLI-утилиты
+struct CliConfig {
+    environment: String
+    max_workers: i64
+    timeout_ms: i64
+    verbose: bool
+    strict_mode: bool
+    format_code: i64
+}
+
+// Элемент проверяемого сервиса в конфигурационном профиле
+struct ServiceProfile {
+    service_id: i64
+    name: String
+    port: i64
+    replicas: i64
+    memory_limit_mb: i64
+}
+
+// Сводный результат аудита конфигураций
+struct AuditReport {
+    total_services: i64
+    valid_services: i64
+    total_replicas: i64
+    total_memory_mb: i64
+    warnings_count: i64
+}
+
+// Инициализация конфигурации по умолчанию
+fn default_cli_config() -> CliConfig {
+    return CliConfig {
+        environment: "production",
+        max_workers: 4,
+        timeout_ms: 2500,
+        verbose: false,
+        strict_mode: true,
+        format_code: 1
+    }
+}
+
+// Применение одного токена командной строки к конфигурации (`write CliConfig`)
+fn apply_cli_token(cfg: write CliConfig, tok: read CliToken) -> Result<i64, String> {
+    var outcome: Result<i64, String> = Err("Неизвестный флаг командной строки")
+
+    if !tok.is_flag {
+        outcome = Err("Ожидался флаг командной строки с префиксом --")
+    } else if tok.flag_name == "--env" {
+        cfg.environment = tok.value_str
+        outcome = Ok(1)
+    } else if tok.flag_name == "--workers" {
+        if tok.numeric_val <= 0 || tok.numeric_val > 128 {
+            outcome = Err("Количество воркеров (--workers) должно быть в диапазоне 1..128")
+        } else {
+            cfg.max_workers = tok.numeric_val
+            outcome = Ok(1)
+        }
+    } else if tok.flag_name == "--timeout" {
+        if tok.numeric_val < 100 {
+            outcome = Err("Таймаут (--timeout) не может быть меньше 100 мс")
+        } else {
+            cfg.timeout_ms = tok.numeric_val
+            outcome = Ok(1)
+        }
+    } else if tok.flag_name == "--verbose" {
+        cfg.verbose = true
+        outcome = Ok(1)
+    } else if tok.flag_name == "--format" {
+        cfg.format_code = tok.numeric_val
+        outcome = Ok(1)
+    }
+
+    return outcome
+}
+
+// Поиск сервиса по порту (`Option<i64>`)
+fn find_service_by_port(services: read [ServiceProfile], target_port: i64) -> Option<i64> {
+    var found: Option<i64> = None
+    for i in 0..services.len() {
+        if services[i].port == target_port {
+            found = Some(services[i].service_id)
+        }
+    }
+    return found
+}
+
+// Валидация одного профиля сервиса (`read ServiceProfile`, `read CliConfig`)
+fn validate_service_profile(svc: read ServiceProfile, cfg: read CliConfig) -> Result<i64, String> {
+    var res: Result<i64, String> = Ok(svc.replicas * svc.memory_limit_mb)
+
+    if svc.port < 1024 || svc.port > 65535 {
+        res = Err("Некорректный TCP-порт сервиса (требуется 1024..65535)")
+    } else if svc.replicas <= 0 {
+        res = Err("Количество реплик сервиса должно быть положительным")
+    } else if cfg.strict_mode && svc.memory_limit_mb < 256 {
+        res = Err("В строгом режиме (strict_mode) лимит памяти не может быть ниже 256 МБ")
+    }
+
+    return res
+}
+
+// Анализ пакета сервисов и накопление отчёта (`write AuditReport`)
+fn analyze_services(
+    services: read [ServiceProfile],
+    cfg: read CliConfig,
+    report: write AuditReport
+) {
+    report.total_services = services.len()
+
+    for i in 0..services.len() {
+        let svc = services[i]
+        let check_res = validate_service_profile(read svc, read cfg)
+        match check_res {
+            Ok(svc_mem) => {
+                report.valid_services += 1
+                report.total_replicas += svc.replicas
+                report.total_memory_mb += svc_mem
+                if cfg.verbose {
+                    print("  [OK] Сервис '")
+                    print(svc.name)
+                    print("' (порт ")
+                    print(svc.port)
+                    print(") -> память (МБ): ")
+                    println(svc_mem)
+                }
+            }
+            Err(_) => {
+                report.warnings_count += 1
+                print("  [WARN] Профиль сервиса '")
+                print(svc.name)
+                print("' отклонён политикой (порт ")
+                print(svc.port)
+                println(")")
+            }
+        }
+    }
+}
+
+// Потребление отчёта и печать финальной сводки (`take AuditReport`)
+fn consume_and_print_report(report: take AuditReport, cfg: read CliConfig) {
+    println("------------------------------------------------------------")
+    print("ОТЧЁТ CLI-АУДИТА | Окружение: ")
+    print(cfg.environment)
+    print(" | Воркеров: ")
+    print(cfg.max_workers)
+    print(" | Таймаут (мс): ")
+    println(cfg.timeout_ms)
+    println("------------------------------------------------------------")
+    print("  Всего проверено сервисов : ")
+    println(report.total_services)
+    print("  Валидных сервисов        : ")
+    println(report.valid_services)
+    print("  Отклонено / предупреждений: ")
+    println(report.warnings_count)
+    print("  Суммарное число реплик   : ")
+    println(report.total_replicas)
+    print("  Суммарная квота RAM (МБ) : ")
+    println(report.total_memory_mb)
+    println("------------------------------------------------------------")
+}
+
+fn main() {
+    println("=== APS Real-World #01: CLI-приложение анализа конфигураций ===")
+
+    var config = default_cli_config()
+
+    defer {
+        println("[defer] Завершение работы CLI-инструмента, код возврата: 0")
+    }
+
+    // Парсинг аргументов командной строки во временном регионе памяти `cli_arena`
+    region cli_arena {
+        let raw_tokens = [
+            CliToken { flag_name: "--env", value_str: "kz-prod-almaty", numeric_val: 0, is_flag: true },
+            CliToken { flag_name: "--workers", value_str: "16", numeric_val: 16, is_flag: true },
+            CliToken { flag_name: "--timeout", value_str: "1500", numeric_val: 1500, is_flag: true },
+            CliToken { flag_name: "--verbose", value_str: "true", numeric_val: 1, is_flag: true },
+            CliToken { flag_name: "--format", value_str: "table", numeric_val: 1, is_flag: true }
+        ]
+
+        var parsed_flags: i64 = 0
+        for i in 0..raw_tokens.len() {
+            let tok = raw_tokens[i]
+            match apply_cli_token(write config, read tok) {
+                Ok(applied) => {
+                    parsed_flags += applied
+                }
+                Err(_) => {
+                    println("Ошибка разбора флага командной строки")
+                }
+            }
+        }
+
+        print("[cli_arena] Успешно разобрано флагов командной строки: ")
+        println(parsed_flags)
+    }
+
+    // Загружаем список профилей микросервисов для анализа
+    let profiles = [
+        ServiceProfile { service_id: 101, name: "api-gateway", port: 8080, replicas: 4, memory_limit_mb: 512 },
+        ServiceProfile { service_id: 102, name: "dispatch-engine", port: 9000, replicas: 6, memory_limit_mb: 1024 },
+        ServiceProfile { service_id: 103, name: "billing-worker", port: 9010, replicas: 3, memory_limit_mb: 512 },
+        ServiceProfile { service_id: 104, name: "legacy-agent", port: 80, replicas: 1, memory_limit_mb: 128 }
+    ]
+
+    // Проверяем поиск сервиса по порту через Option<i64>
+    match find_service_by_port(read profiles, 9000) {
+        Some(found_id) => {
+            print("Найден сервис на порту 9000, ID: ")
+            println(found_id)
+        }
+        None => {
+            println("Сервис на порту 9000 не зарегистрирован")
+        }
+    }
+
+    var report = AuditReport {
+        total_services: 0,
+        valid_services: 0,
+        total_replicas: 0,
+        total_memory_mb: 0,
+        warnings_count: 0
+    }
+
+    analyze_services(read profiles, read config, write report)
+
+    // Передаём владение отчётом в финальный генератор вывода (`take report`)
+    consume_and_print_report(take report, read config)
+}

@@ -1,0 +1,156 @@
+// ============================================================================
+// Модуль: std.async
+// Описание: Асинхронная среда выполнения и структурированная конкурентность:
+// `Task<T>`, `Executor`, `TaskScope`, `TimerFuture`, `async`/`await`/`spawn`.
+// ============================================================================
+
+module std.async
+
+pub const DEFAULT_EXECUTOR_THREADS: i64 = 4
+
+/// Состояние выполнения асинхронной задачи
+pub enum PollStatus {
+    Pending,
+    Ready,
+    Cancelled
+}
+
+/// Будущее событие таймера (`TimerFuture`)
+pub struct TimerFuture {
+    pub delay_ms: i64
+    pub completed: bool
+}
+
+impl TimerFuture {
+    pub fn after_ms(delay_ms: i64) -> TimerFuture {
+        let d = if delay_ms < 0 { 0 } else { delay_ms }
+        return TimerFuture {
+            delay_ms: d,
+            completed: false
+        }
+    }
+
+    pub fn poll_ready(write self) -> PollStatus {
+        self.completed = true
+        return PollStatus::Ready
+    }
+}
+
+/// Область структурированной конкурентности (`TaskScope`)
+/// Гарантирует завершение всех дочерних задач до выхода из лексической области.
+pub struct TaskScope {
+    pub scope_name: String
+    pub active_tasks: i64
+    pub completed_tasks: i64
+    pub failed_tasks: i64
+}
+
+impl TaskScope {
+    pub fn new(scope_name: String) -> TaskScope {
+        return TaskScope {
+            scope_name: scope_name,
+            active_tasks: 0,
+            completed_tasks: 0,
+            failed_tasks: 0
+        }
+    }
+
+    pub fn register_spawn(write self) {
+        self.active_tasks += 1
+    }
+
+    pub fn complete_one(write self) {
+        if self.active_tasks > 0 {
+            self.active_tasks -= 1
+            self.completed_tasks += 1
+        }
+    }
+
+    pub fn is_drained(read self) -> bool {
+        return self.active_tasks == 0
+    }
+}
+
+/// Многопоточный work-stealing планировщик задач (`Executor`)
+pub struct Executor {
+    pub worker_threads: i64
+    pub queued_tasks: i64
+    pub executed_tasks: i64
+    pub running: bool
+}
+
+impl Executor {
+    pub fn new(worker_threads: i64) -> Executor {
+        let w = if worker_threads <= 0 { DEFAULT_EXECUTOR_THREADS } else { worker_threads }
+        return Executor {
+            worker_threads: w,
+            queued_tasks: 0,
+            executed_tasks: 0,
+            running: true
+        }
+    }
+
+    pub fn schedule_task(write self) {
+        self.queued_tasks += 1
+    }
+
+    pub fn run_until_idle(write self) -> i64 {
+        let done = self.queued_tasks
+        self.executed_tasks += done
+        self.queued_tasks = 0
+        return done
+    }
+
+    pub fn shutdown(write self) {
+        self.running = false
+    }
+}
+
+/// Асинхронная задержка без блокировки потока исполнения
+pub async fn async_sleep_ms(ms: i64) -> i64 {
+    if ms > 0 {
+        sleep_ms(0)
+    }
+    return ms
+}
+
+/// Порождение и ожидание асинхронной задачи `Task<i64>`
+pub async fn run_async_step(input: i64) -> i64 {
+    let waited = await async_sleep_ms(5)
+    let task_handle: Task<i64> = spawn (input + waited)
+    let result = await task_handle
+    return result
+}
+
+/// Самопроверка модуля `std.async`
+pub fn self_test() -> bool {
+    var timer = TimerFuture.after_ms(25)
+    let _ = timer.poll_ready()
+    assert(timer.completed)
+
+    var scope = TaskScope.new("http_batch")
+    scope.register_spawn()
+    scope.register_spawn()
+    assert(!scope.is_drained())
+    scope.complete_one()
+    scope.complete_one()
+    assert(scope.is_drained())
+    assert_eq(scope.completed_tasks, 2)
+
+    var exec = Executor.new(4)
+    exec.schedule_task()
+    exec.schedule_task()
+    exec.schedule_task()
+    let ran = exec.run_until_idle()
+    assert_eq(ran, 3)
+    exec.shutdown()
+    assert(!exec.running)
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.async] self_test passed")
+}

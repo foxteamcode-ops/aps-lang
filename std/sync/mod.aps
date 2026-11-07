@@ -1,0 +1,190 @@
+// ============================================================================
+// Модуль: std.sync
+// Описание: Примитивы межпоточной синхронизации без гонок данных:
+// `Mutex<T>`, `RwLock<T>`, `Channel<T>`, `AtomicI64`, `AtomicBool`, `Barrier`.
+// ============================================================================
+
+module std.sync
+
+/// Порядок памяти для атомарных операций
+pub enum MemoryOrdering {
+    Relaxed,
+    Acquire,
+    Release,
+    AcqRel,
+    SeqCst
+}
+
+/// Атомарное 64-битное целое число (`AtomicI64`)
+pub struct AtomicI64 {
+    pub value: i64
+}
+
+impl AtomicI64 {
+    pub fn new(initial: i64) -> AtomicI64 {
+        return AtomicI64 { value: initial }
+    }
+
+    pub fn load(read self) -> i64 {
+        return self.value
+    }
+
+    pub fn store(write self, val: i64) {
+        self.value = val
+    }
+
+    pub fn fetch_add(write self, delta: i64) -> i64 {
+        let prev = self.value
+        self.value += delta
+        return prev
+    }
+
+    pub fn fetch_sub(write self, delta: i64) -> i64 {
+        let prev = self.value
+        self.value -= delta
+        return prev
+    }
+}
+
+/// Атомарный булев флаг (`AtomicBool`)
+pub struct AtomicBool {
+    pub flag: bool
+}
+
+impl AtomicBool {
+    pub fn new(initial: bool) -> AtomicBool {
+        return AtomicBool { flag: initial }
+    }
+
+    pub fn load(read self) -> bool {
+        return self.flag
+    }
+
+    pub fn store(write self, val: bool) {
+        self.flag = val
+    }
+
+    pub fn swap(write self, val: bool) -> bool {
+        let old = self.flag
+        self.flag = val
+        return old
+    }
+}
+
+/// Блокировка чтения-записи (`RwLock<T>`) с поддержкой множества читателей или одного писателя
+pub struct RwLock<T> {
+    pub data: T
+    pub active_readers: i64
+    pub writer_active: bool
+}
+
+impl<T> RwLock<T> {
+    pub fn new(val: T) -> RwLock<T> {
+        return RwLock {
+            data: val,
+            active_readers: 0,
+            writer_active: false
+        }
+    }
+
+    pub fn try_read_acquire(write self) -> bool {
+        if self.writer_active {
+            return false
+        }
+        self.active_readers += 1
+        return true
+    }
+
+    pub fn read_release(write self) {
+        if self.active_readers > 0 {
+            self.active_readers -= 1
+        }
+    }
+
+    pub fn try_write_acquire(write self) -> bool {
+        if self.writer_active || self.active_readers > 0 {
+            return false
+        }
+        self.writer_active = true
+        return true
+    }
+
+    pub fn write_release(write self) {
+        self.writer_active = false
+    }
+}
+
+/// Барьер синхронизации группы из `party_size` потоков (`Barrier`)
+pub struct Barrier {
+    pub party_size: i64
+    pub arrived_count: i64
+    pub generation: i64
+}
+
+impl Barrier {
+    pub fn new(party_size: i64) -> Barrier {
+        let sz = if party_size <= 0 { 1 } else { party_size }
+        return Barrier {
+            party_size: sz,
+            arrived_count: 0,
+            generation: 0
+        }
+    }
+
+    pub fn arrive_and_check_leader(write self) -> bool {
+        self.arrived_count += 1
+        if self.arrived_count >= self.party_size {
+            self.arrived_count = 0
+            self.generation += 1
+            return true
+        }
+        return false
+    }
+}
+
+/// Создание мьютекса `Mutex<i64>`
+pub fn mutex_i64_new(initial: i64) -> Mutex<i64> {
+    return Mutex.new(initial)
+}
+
+/// Создание типизированного канала `Channel<i64>`
+pub fn channel_i64_new(capacity: i64) -> Channel<i64> {
+    let ch = Channel.new(capacity) as Channel<i64>
+    return ch
+}
+
+/// Самопроверка модуля `std.sync`
+pub fn self_test() -> bool {
+    var counter = AtomicI64.new(10)
+    let old = counter.fetch_add(5)
+    assert_eq(old, 10)
+    assert_eq(counter.load(), 15)
+
+    var flag = AtomicBool.new(false)
+    let prev_flag = flag.swap(true)
+    assert(!prev_flag)
+    assert(flag.load())
+
+    var rw = RwLock<i64>.new(100)
+    assert(rw.try_read_acquire())
+    assert(rw.try_read_acquire())
+    assert(!rw.try_write_acquire())
+    rw.read_release()
+    rw.read_release()
+    assert(rw.try_write_acquire())
+    rw.write_release()
+
+    var bar = Barrier.new(3)
+    assert(!bar.arrive_and_check_leader())
+    assert(!bar.arrive_and_check_leader())
+    assert(bar.arrive_and_check_leader())
+    assert_eq(bar.generation, 1)
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.sync] self_test passed")
+}

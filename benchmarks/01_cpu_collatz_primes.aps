@@ -1,0 +1,89 @@
+// ============================================================================
+// Benchmark 01: CPU-Intensive Workload (Collatz Conjecture & Prime / Matrix ALU)
+// Compares pure integer ALU, branch prediction, and LLVM loop optimization.
+// Input: Collatz steps for N = 1..500,000 + Prime & Polynomial accumulation.
+// ============================================================================
+
+module bench_cpu_collatz_primes
+
+fn collatz_steps(start_n: i64) -> i64 {
+    var n: i64 = start_n
+    var steps: i64 = 0
+    while n > 1 {
+        if (n % 2) == 0 {
+            n = n / 2
+        } else {
+            n = 3 * n + 1
+        }
+        steps += 1
+    }
+    return steps
+}
+
+fn is_prime_fast(n: i64) -> bool {
+    if n < 2 {
+        return false
+    }
+    if n == 2 || n == 3 {
+        return true
+    }
+    if (n % 2) == 0 || (n % 3) == 0 {
+        return false
+    }
+    var d: i64 = 5
+    while (d * d) <= n {
+        if (n % d) == 0 || (n % (d + 2)) == 0 {
+            return false
+        }
+        d += 6
+    }
+    return true
+}
+
+fn matrix_poly_kernel(iterations: i64) -> i64 {
+    var acc0: i64 = 17
+    var acc1: i64 = 31
+    var acc2: i64 = 47
+    var acc3: i64 = 73
+    for i in 1..iterations {
+        acc0 = (acc0 * 1103515245 + 12345 + i) & 2147483647
+        acc1 = (acc1 ^ (acc0 >> 3)) + (i * 7)
+        acc2 = (acc2 + acc1) & 1073741823
+        acc3 = acc3 ^ (acc2 + i * 13)
+    }
+    return (acc0 + acc1 + acc2 + acc3) & 2147483647
+}
+
+fn main() {
+    let t0 = time_now_ns()
+
+    // Phase 1: Collatz total stopping time over 500,000 integers (~65.8M iterations)
+    var total_collatz_steps: i64 = 0
+    for n in 1..500001 {
+        total_collatz_steps += collatz_steps(n)
+    }
+
+    // Phase 2: Prime counting up to 200,000 via 6k +/- 1 trial division
+    var prime_count: i64 = 0
+    for p in 2..200001 {
+        if is_prime_fast(p) {
+            prime_count += 1
+        }
+    }
+
+    // Phase 3: 5,000,000 iterations of 4-lane integer polynomial matrix mixing
+    let poly_checksum = matrix_poly_kernel(5000001)
+
+    let t1 = time_now_ns()
+    let elapsed_us = (t1 - t0) / 1000
+
+    let checksum = total_collatz_steps + prime_count + poly_checksum
+    print("BENCH_01_CPU elapsed_us=")
+    print(elapsed_us)
+    print(" collatz=")
+    print(total_collatz_steps)
+    print(" primes=")
+    print(prime_count)
+    print(" checksum=")
+    println(checksum)
+}

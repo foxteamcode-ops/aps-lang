@@ -1,0 +1,75 @@
+// ============================================================================
+// Файл: 30_ffi_c_interoperability.aps
+// Описание: Взаимодействие с внешним кодом на языке C (FFI — Foreign Function
+// Interface) через блок `extern "C"` и изоляция небезопасных вызовов в блоке
+// `unsafe { ... }` с построением безопасной типизированной обёртки APS.
+// ============================================================================
+
+module ffi_c_demo
+
+// 1. Объявление внешних функций со стандартным системным ABI языка C (`extern "C"`).
+// Вызов любой внешней функции напрямую требует блока `unsafe`.
+extern "C" {
+    fn abs(x: i32) -> i32
+    fn sqrt(x: f64) -> f64
+    fn hypot(dx: f64, dy: f64) -> f64
+}
+
+// 2. Безопасная обёртка (Safe Wrapper) над `extern "C" fn abs`.
+// Скрывает блок `unsafe` внутри проверенной функции.
+pub fn safe_abs_i32(val: i32) -> i32 {
+    // Предотвращаем переполнение для минимального значения i32 (-2147483648)
+    if val == -2147483648 {
+        return 2147483647
+    }
+    unsafe {
+        return abs(val)
+    }
+}
+
+// 3. Безопасная обёртка над `extern "C" fn sqrt` с возвратом `Result<f64, String>`
+pub fn safe_sqrt(val: f64) -> Result<f64, String> {
+    if val < 0.0 {
+        return Err("Извлечение квадратного корня из отрицательного числа не определено в R")
+    }
+    unsafe {
+        let root = sqrt(val)
+        return Ok(root)
+    }
+}
+
+// 4. Вычисление евклидова расстояния через C ABI `hypot`
+pub fn safe_distance_2d(dx: f64, dy: f64) -> f64 {
+    unsafe {
+        return hypot(dx, dy)
+    }
+}
+
+fn main() {
+    println("=== FFI и безопасные обёртки над extern \"C\" и unsafe в APS ===")
+
+    let negative_num: i32 = -420
+    let module_val = safe_abs_i32(negative_num)
+    print("safe_abs_i32(-420) = ")
+    println(module_val)
+
+    let dist = safe_distance_2d(3.0, 4.0)
+    print("Евклидово расстояние hypot(3.0, 4.0) = ")
+    println(dist)
+
+    match safe_sqrt(144.0) {
+        Ok(root) => {
+            print("safe_sqrt(144.0) = ")
+            println(root)
+        }
+        Err(msg) => println(msg)
+    }
+
+    match safe_sqrt(-16.0) {
+        Ok(root) => println(root),
+        Err(msg) => {
+            print("Перехвачен некорректный аргумент перед FFI-вызовом: ")
+            println(msg)
+        }
+    }
+}

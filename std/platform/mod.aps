@@ -1,0 +1,110 @@
+// ============================================================================
+// Модуль: std.platform
+// Описание: Определение целевой операционной системы (`TargetOs`),
+// процессорной архитектуры (`CpuArch`), параметров кэш-линий, SIMD и памяти
+// (`PlatformInfo`).
+// ============================================================================
+
+module std.platform
+
+pub const POINTER_WIDTH_BITS: i64 = 64
+pub const POINTER_SIZE_BYTES: i64 = 8
+pub const L1_CACHE_LINE_BYTES: i64 = 64
+pub const OS_PAGE_SIZE_BYTES: i64 = 4096
+
+/// Семейство целевой операционной системы (`TargetOs`)
+pub enum TargetOs {
+    Windows,
+    Linux,
+    MacOs,
+    FreeBsd,
+    BareMetal
+}
+
+/// Архитектура центрального процессора (`CpuArch`)
+pub enum CpuArch {
+    X86_64,
+    AArch64,
+    RiscV64,
+    Wasm32
+}
+
+/// Сводная информация о целевой аппаратно-программной платформе (`PlatformInfo`)
+pub struct PlatformInfo {
+    pub os_name: String
+    pub arch_name: String
+    pub pointer_bits: i64
+    pub cache_line_bytes: i64
+    pub page_size_bytes: i64
+    pub logical_cores: i64
+    pub simd_width_bits: i64
+    pub is_little_endian: bool
+}
+
+impl PlatformInfo {
+    pub fn host_default() -> PlatformInfo {
+        return PlatformInfo {
+            os_name: "windows-x86_64",
+            arch_name: "x86_64",
+            pointer_bits: POINTER_WIDTH_BITS,
+            cache_line_bytes: L1_CACHE_LINE_BYTES,
+            page_size_bytes: OS_PAGE_SIZE_BYTES,
+            logical_cores: 8,
+            simd_width_bits: 256,
+            is_little_endian: true
+        }
+    }
+
+    pub fn is_64bit(read self) -> bool {
+        return self.pointer_bits == 64
+    }
+
+    pub fn has_avx2_or_neon(read self) -> bool {
+        return self.simd_width_bits >= 128
+    }
+
+    pub fn pages_for_bytes(read self, total_bytes: i64) -> i64 {
+        if total_bytes <= 0 {
+            return 0
+        }
+        return (total_bytes + self.page_size_bytes - 1) / self.page_size_bytes
+    }
+}
+
+/// Размер кэш-линии процессора в байтах
+pub fn cache_line_size() -> i64 {
+    return L1_CACHE_LINE_BYTES
+}
+
+/// Размер страницы виртуальной памяти ОС в байтах
+pub fn page_size() -> i64 {
+    return OS_PAGE_SIZE_BYTES
+}
+
+/// Проверка 64-битной адресации указателей на текущей платформе
+pub fn is_target_64bit() -> bool {
+    return POINTER_WIDTH_BITS == 64
+}
+
+/// Самопроверка модуля `std.platform`
+pub fn self_test() -> bool {
+    let info = PlatformInfo.host_default()
+    assert(info.is_64bit())
+    assert(info.has_avx2_or_neon())
+    assert(info.is_little_endian)
+    assert_eq(info.cache_line_bytes, 64)
+    assert_eq(info.pages_for_bytes(4096), 1)
+    assert_eq(info.pages_for_bytes(4097), 2)
+
+    assert_eq(cache_line_size(), 64)
+    assert_eq(page_size(), 4096)
+    assert(is_target_64bit())
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.platform] self_test passed")
+}

@@ -1,0 +1,82 @@
+// ============================================================================
+// Файл: 17_ama_read_write_capabilities.aps
+// Описание: Система прав доступа AMA (Access Capabilities: `read T` и `write T`).
+// Демонстрирует безопасное разделяемое чтение (`read`) и эксклюзивную модификацию
+// (`write`) без аннотаций времён жизни `'a` на каноническом примере `Driver`.
+// ============================================================================
+
+module ama_capabilities_demo
+
+struct Driver {
+    id: i64
+    name: String
+    balance: i64
+}
+
+// Временное право только на чтение (`read Driver`):
+// - Не копирует структуру
+// - Не забирает владение
+// - Разрешает одновременное чтение несколькими параметрами
+fn show_driver(driver: read Driver) {
+    print("Водитель [id=")
+    print(driver.id)
+    print(", имя=")
+    print(driver.name)
+    print(", баланс=")
+    print(driver.balance)
+    println("]")
+}
+
+// Сравнение балансов двух водителей: оба параметра принимаются по `read Driver`.
+// Закон алиасинга AMA разрешает передавать даже один и тот же объект в два `read` параметра!
+fn compare_balances(d1: read Driver, d2: read Driver) -> i64 {
+    return d1.balance - d2.balance
+}
+
+// Эксклюзивное временное право на запись (`write Driver`):
+// - На время вызова никто другой не может ни читать, ни писать в этот же объект
+// - По завершении вызова исходный владелец продолжает работать со структурой
+fn add_balance(driver: write Driver, amount: i64) {
+    driver.balance += amount
+}
+
+fn apply_commission(driver: write Driver, fee_percent: i64) {
+    let fee = (driver.balance * fee_percent) / 100
+    driver.balance -= fee
+}
+
+fn main() {
+    println("=== Права доступа read T и write T в APS ===")
+
+    var driver = Driver {
+        id: 1,
+        name: "Alibek",
+        balance: 1000
+    }
+
+    // 1. Чтение состояния через `read`
+    show_driver(read driver)
+
+    // 2. Последовательные эксклюзивные модификации через `write`
+    add_balance(write driver, 500)
+    show_driver(read driver)
+
+    apply_commission(write driver, 10)
+    show_driver(read driver)
+
+    // 3. Одновременное чтение нескольких объектов (или одного объекта дважды)
+    let partner = Driver {
+        id: 2,
+        name: "Nurlan",
+        balance: 1100
+    }
+
+    let diff = compare_balances(read driver, read partner)
+    print("Разница балансов Alibek и Nurlan: ")
+    println(diff)
+
+    // Безопасное множественное чтение одного и того же объекта:
+    let self_diff = compare_balances(read driver, read driver)
+    print("Разница баланса водителя с самим собой: ")
+    println(self_diff)
+}

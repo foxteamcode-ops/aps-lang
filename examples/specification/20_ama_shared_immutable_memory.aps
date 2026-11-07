@@ -1,0 +1,65 @@
+// ============================================================================
+// Файл: 20_ama_shared_immutable_memory.aps
+// Описание: Уровень 4 архитектуры памяти AMA (Shared Immutable Memory).
+// Функция `share(obj)` забирает единоличное владение объектом и переводит его
+// в статус глубоко неизменяемого разделяемого ресурса `Shared<T>`, который
+// можно безопасно передавать множеству читателей и потоков без копирования данных.
+// ============================================================================
+
+module ama_shared_demo
+
+struct ClusterConfig {
+    cluster_name: String
+    max_connections: i64
+    timeout_ms: i64
+    tls_enabled: bool
+}
+
+// Рабочий обработчик принимает разделяемую конфигурацию `read Shared<ClusterConfig>`
+fn start_worker_subsystem(worker_id: i64, cfg: read Shared<ClusterConfig>) {
+    print("  Воркер #")
+    print(worker_id)
+    print(" подключён к кластеру '")
+    print(cfg.cluster_name)
+    print("', лимит соединений: ")
+    print(cfg.max_connections)
+    print(", таймаут (мс): ")
+    println(cfg.timeout_ms)
+}
+
+fn verify_security_policy(cfg: read Shared<ClusterConfig>) -> bool {
+    return cfg.tls_enabled && cfg.timeout_ms <= 5000
+}
+
+fn main() {
+    println("=== AMA Уровень 4: Разделяемая неизменяемая память share(...) ===")
+
+    // 1. Создаём конфигурацию как обычный изменяемый объект с единственным владельцем
+    var raw_config = ClusterConfig {
+        cluster_name: "APS-KZ-Production-01",
+        max_connections: 10000,
+        timeout_ms: 1500,
+        tls_enabled: true
+    }
+
+    // На этапе инициализации можем модифицировать поля
+    raw_config.max_connections = 25000
+
+    // 2. Переводим объект в разделяемую неизменяемую память через `share(...)`.
+    // Владение `raw_config` поглощается, и возвращается `Shared<ClusterConfig>`.
+    // С этого момента данные защищены от любых модификаций (Deep Immutability).
+    let shared_cfg = share(raw_config)
+
+    // 3. Клонирование дескриптора `Shared<T>` копирует только лёгкий указатель
+    // и атомарно увеличивает счётчик ссылок без дублирования самой структуры.
+    let cfg_for_audit = shared_cfg.clone()
+
+    if verify_security_policy(read cfg_for_audit) {
+        println("Политика безопасности кластера подтверждена (TLS активен).")
+    }
+
+    // Передаём разделяемую конфигурацию в несколько подсистем
+    start_worker_subsystem(1, read shared_cfg)
+    start_worker_subsystem(2, read shared_cfg)
+    start_worker_subsystem(3, read cfg_for_audit)
+}

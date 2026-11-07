@@ -1,0 +1,25 @@
+[package]
+name = "aps"
+version = "1.0.0"
+edition = "2021"
+authors = ["APS Compiler Engineering Team"]
+description = "APS (Advanced Performance Systems) Programming Language Compiler, AMA Memory Analyzer, LLVM Backend, Package Manager (apm), and LSP Server"
+
+[lib]
+name = "aps"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aps"
+path = "src/main.rs"
+
+[[bin]]
+name = "apm"
+path = "src/bin/apm.rs"
+
+[[bin]]
+name = "aps-lsp"
+path = "src/bin/aps_lsp.rs"
+[[bin]]
+name = "gen-learning"
+path = "src/bin/gen_learning.rs"

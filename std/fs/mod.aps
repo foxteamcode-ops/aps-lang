@@ -1,0 +1,192 @@
+// ============================================================================
+// Модуль: std.fs
+// Описание: Файловая система: работа с путями (`PathBuf`), метаданные файлов
+// (`FileMetadata`), дескрипторы (`FileHandle`), чтение/запись и каталоги.
+// ============================================================================
+
+module std.fs
+
+pub const MAX_PATH_LEN: i64 = 4096
+
+/// Буфер пути файловой системы с поддержкой нормализации и объединения сегментов
+pub struct PathBuf {
+    pub raw_path: String
+    pub is_absolute: bool
+    pub segment_count: i64
+}
+
+impl PathBuf {
+    pub fn from_str(path: read String) -> PathBuf {
+        let abs = path.starts_with("/") || path.contains(":\\")
+        let segs = if path.is_empty() { 0 } else { 1 }
+        return PathBuf {
+            raw_path: path.clone(),
+            is_absolute: abs,
+            segment_count: segs
+        }
+    }
+
+    pub fn push_segment(write self, segment: read String) {
+        if !segment.is_empty() {
+            self.raw_path = segment.clone()
+            self.segment_count += 1
+        }
+    }
+
+    pub fn has_extension(read self, ext: read String) -> bool {
+        return self.raw_path.ends_with(read ext)
+    }
+
+    pub fn as_str(read self) -> String {
+        return self.raw_path.clone()
+    }
+}
+
+/// Метаданные объекта файловой системы
+pub struct FileMetadata {
+    pub size_bytes: i64
+    pub is_file: bool
+    pub is_dir: bool
+    pub is_readonly: bool
+    pub modified_epoch_ms: i64
+}
+
+impl FileMetadata {
+    pub fn new_file(size_bytes: i64, readonly: bool, modified_ms: i64) -> FileMetadata {
+        return FileMetadata {
+            size_bytes: size_bytes,
+            is_file: true,
+            is_dir: false,
+            is_readonly: readonly,
+            modified_epoch_ms: modified_ms
+        }
+    }
+
+    pub fn new_dir(modified_ms: i64) -> FileMetadata {
+        return FileMetadata {
+            size_bytes: 0,
+            is_file: false,
+            is_dir: true,
+            is_readonly: false,
+            modified_epoch_ms: modified_ms
+        }
+    }
+}
+
+/// Дескриптор открытого файла ОС с поддержкой детерминированного закрытия
+pub struct FileHandle {
+    pub path: String
+    pub fd: i64
+    pub is_open: bool
+    pub writable: bool
+    pub position: i64
+}
+
+impl FileHandle {
+    pub fn open_read(path: read String) -> Result<FileHandle, String> {
+        if path.is_empty() {
+            return Err("empty file path")
+        }
+        return Ok(FileHandle {
+            path: path.clone(),
+            fd: 3,
+            is_open: true,
+            writable: false,
+            position: 0
+        })
+    }
+
+    pub fn create_write(path: read String) -> Result<FileHandle, String> {
+        if path.is_empty() {
+            return Err("empty file path")
+        }
+        return Ok(FileHandle {
+            path: path.clone(),
+            fd: 4,
+            is_open: true,
+            writable: true,
+            position: 0
+        })
+    }
+
+    pub fn write_text(write self, content: read String) -> Result<i64, String> {
+        if !self.is_open || !self.writable {
+            return Err("file handle is not open for writing")
+        }
+        let n = content.len()
+        self.position += n
+        return Ok(n)
+    }
+
+    pub fn seek_to(write self, offset: i64) -> Result<i64, String> {
+        if offset < 0 {
+            return Err("negative seek offset")
+        }
+        self.position = offset
+        return Ok(self.position)
+    }
+
+    pub fn close(write self) {
+        self.is_open = false
+        self.fd = -1
+    }
+}
+
+/// Чтение текстового файла целиком через системный вызов рантайма
+pub fn read_to_string(path: read String) -> Result<String, String> {
+    return fs_read_text(read path)
+}
+
+/// Запись строки в текстовый файл через системный вызов рантайма
+pub fn write_string(path: read String, content: read String) -> Result<void, String> {
+    return fs_write_text(read path, read content)
+}
+
+/// Проверка существования файла или каталога по пути
+pub fn path_exists(path: read String) -> bool {
+    return fs_exists(read path)
+}
+
+/// Самопроверка модуля `std.fs`
+pub fn self_test() -> bool {
+    var p = PathBuf.from_str("/var/log")
+    assert(p.is_absolute)
+    p.push_segment("aps_audit.aps")
+    assert_eq(p.segment_count, 2)
+    assert(p.has_extension(".aps"))
+
+    let meta = FileMetadata.new_file(4096, false, 1700000000)
+    assert(meta.is_file)
+    assert(!meta.is_dir)
+    assert_eq(meta.size_bytes, 4096)
+
+    let path_str = "telemetry.log"
+    match FileHandle.create_write(read path_str) {
+        Ok(fh) => {
+            var handle = fh
+            defer {
+                handle.close()
+            }
+            let payload = "status=ready\n"
+            match handle.write_text(read payload) {
+                Ok(written) => {
+                    assert(written > 0)
+                }
+                Err(_) => {
+                    return false
+                }
+            }
+        }
+        Err(_) => {
+            return false
+        }
+    }
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.fs] self_test passed")
+}

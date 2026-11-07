@@ -1,0 +1,1 @@
+struct Batch { id: i64, size: i64 } fn process(b: take Batch) -> i64 { b.size * 2 } fn main() { let b = Batch { id: 1, size: 250 }; println(process(take b)) }

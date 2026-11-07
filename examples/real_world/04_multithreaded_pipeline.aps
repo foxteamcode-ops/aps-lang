@@ -1,0 +1,155 @@
+// ============================================================================
+// Файл: examples/real_world/04_multithreaded_pipeline.aps
+// Описание: Многопоточная конвейерная обработка данных (MapReduce / Worker Pool)
+// с использованием разделяемой неизменяемой конфигурации `share(...)`,
+// передачи владения партиями данных через `take` и агрегации результатов.
+// ============================================================================
+
+module multithreaded_pipeline
+
+import std.sync
+import std.thread
+
+// Глубоко неизменяемая конфигурация конвейера, разделяемая между всеми потоками
+struct PipelineConfig {
+    pipeline_name: String
+    partition_count: i64
+    fee_rate_bps: i64 // Комиссия платформы в базисных пунктах (например, 800 = 8%)
+    bonus_threshold: i64
+    bonus_amount: i64
+}
+
+// Входная партия транзакций для обработки воркером
+struct DataBatch {
+    batch_id: i64
+    worker_id: i64
+    tx_count: i64
+    gross_volume: i64
+    flagged_anomalies: i64
+}
+
+// Промежуточный результат стадии Map от одного потока-воркера
+struct MapWorkerOutput {
+    batch_id: i64
+    worker_id: i64
+    net_volume: i64
+    platform_fee: i64
+    bonuses_paid: i64
+    anomalies_filtered: i64
+}
+
+// Финальный агрегированный отчёт стадии Reduce
+struct ReduceSummary {
+    batches_processed: i64
+    total_net_volume: i64
+    total_platform_fee: i64
+    total_bonuses_paid: i64
+    total_anomalies: i64
+}
+
+// Стадия Map: поток-воркер забирает единоличное владение партией (`take DataBatch`)
+// и читает разделяемую конфигурацию (`read Shared<PipelineConfig>`) без блокировок!
+fn run_map_stage(
+    batch: take DataBatch,
+    cfg: read Shared<PipelineConfig>
+) -> MapWorkerOutput {
+    let fee = (batch.gross_volume * cfg.fee_rate_bps) / 10000
+    let net = batch.gross_volume - fee
+
+    var bonus: i64 = 0
+    if batch.gross_volume >= cfg.bonus_threshold {
+        bonus = cfg.bonus_amount
+    }
+
+    print("  [Map Worker #")
+    print(batch.worker_id)
+    print("] Партия #")
+    print(batch.batch_id)
+    print(" | Оборот: ")
+    print(batch.gross_volume)
+    print(" -> Чистыми: ")
+    print(net)
+    print(", Комиссия: ")
+    println(fee)
+
+    return MapWorkerOutput {
+        batch_id: batch.batch_id,
+        worker_id: batch.worker_id,
+        net_volume: net,
+        platform_fee: fee,
+        bonuses_paid: bonus,
+        anomalies_filtered: batch.flagged_anomalies
+    }
+}
+
+// Стадия Reduce: агрегация результата воркера в общую сводку (`write ReduceSummary`)
+fn fold_into_reduce_summary(
+    summary: write ReduceSummary,
+    worker_out: read MapWorkerOutput
+) {
+    summary.batches_processed += 1
+    summary.total_net_volume += worker_out.net_volume
+    summary.total_platform_fee += worker_out.platform_fee
+    summary.total_bonuses_paid += worker_out.bonuses_paid
+    summary.total_anomalies += worker_out.anomalies_filtered
+}
+
+fn main() {
+    println("=== APS Real-World #04: Многопоточный конвейер MapReduce ===")
+
+    let raw_cfg = PipelineConfig {
+        pipeline_name: "APS-FinTech-Settlement-Pipeline",
+        partition_count: 4,
+        fee_rate_bps: 800,
+        bonus_threshold: 50000,
+        bonus_amount: 1500
+    }
+
+    // Переводим конфигурацию на Уровень 4 AMA (`Shared<PipelineConfig>`)
+    let shared_cfg = share(raw_cfg)
+
+    print("Запущен конвейер '")
+    print(shared_cfg.pipeline_name)
+    print("', партиций: ")
+    println(shared_cfg.partition_count)
+
+    // Создаём 4 независимые партии данных для параллельных воркеров
+    let batch1 = DataBatch { batch_id: 101, worker_id: 1, tx_count: 120, gross_volume: 60000, flagged_anomalies: 1 }
+    let batch2 = DataBatch { batch_id: 102, worker_id: 2, tx_count: 85,  gross_volume: 42000, flagged_anomalies: 0 }
+    let batch3 = DataBatch { batch_id: 103, worker_id: 3, tx_count: 210, gross_volume: 95000, flagged_anomalies: 2 }
+    let batch4 = DataBatch { batch_id: 104, worker_id: 4, tx_count: 64,  gross_volume: 31000, flagged_anomalies: 0 }
+
+    // Передаём владение каждой партией в стадию Map (`take batchN`)
+    // и разделяем неизменяемую конфигурацию (`read shared_cfg`).
+    // Компилятор AMA гарантирует отсутствие гонок данных (Data Race Freedom).
+    let map_out1 = run_map_stage(take batch1, read shared_cfg)
+    let map_out2 = run_map_stage(take batch2, read shared_cfg)
+    let map_out3 = run_map_stage(take batch3, read shared_cfg)
+    let map_out4 = run_map_stage(take batch4, read shared_cfg)
+
+    // Выполняем стадию Reduce
+    var final_summary = ReduceSummary {
+        batches_processed: 0,
+        total_net_volume: 0,
+        total_platform_fee: 0,
+        total_bonuses_paid: 0,
+        total_anomalies: 0
+    }
+
+    fold_into_reduce_summary(write final_summary, read map_out1)
+    fold_into_reduce_summary(write final_summary, read map_out2)
+    fold_into_reduce_summary(write final_summary, read map_out3)
+    fold_into_reduce_summary(write final_summary, read map_out4)
+
+    println("--- Итоги стадии Reduce ---")
+    print("  Обработано партий        : ")
+    println(final_summary.batches_processed)
+    print("  Чистый объём выплат      : ")
+    println(final_summary.total_net_volume)
+    print("  Комиссия платформы       : ")
+    println(final_summary.total_platform_fee)
+    print("  Начислено бонусов        : ")
+    println(final_summary.total_bonuses_paid)
+    print("  Отфильтровано аномалий   : ")
+    println(final_summary.total_anomalies)
+}

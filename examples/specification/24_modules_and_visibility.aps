@@ -1,0 +1,65 @@
+// ============================================================================
+// Файл: 24_modules_and_visibility.aps
+// Описание: Модульная система языка APS: объявление модуля `module`, импорт
+// зависимостей `import`, модификатор публичной видимости `pub` и инкапсуляция
+// внутренних деталей реализации.
+// ============================================================================
+
+module billing_engine
+
+import std.io
+import std.math
+
+// Внутренняя константа модуля (приватна по умолчанию, не видна снаружи модуля)
+const INTERNAL_TAX_RATE_BPS: i64 = 1200 // 12.00% в базисных пунктах (1/10000)
+
+// Публичная структура счёта-фактуры (`pub struct`)
+pub struct Invoice {
+    pub invoice_id: i64
+    pub customer: String
+    pub subtotal: i64
+    tax_amount: i64 // Приватное поле: вычисляется только функциями модуля `billing_engine`
+}
+
+// Приватная вспомогательная функция расчёта налога
+fn calculate_tax_internal(subtotal: i64) -> i64 {
+    return (subtotal * INTERNAL_TAX_RATE_BPS) / 10000
+}
+
+// Публичный конструктор (`pub fn`), обеспечивающий инварианты структуры `Invoice`
+pub fn create_invoice(id: i64, customer: String, subtotal: i64) -> Invoice {
+    let tax = calculate_tax_internal(subtotal)
+    return Invoice {
+        invoice_id: id,
+        customer: customer,
+        subtotal: subtotal,
+        tax_amount: tax
+    }
+}
+
+// Публичная функция получения полной суммы к оплате (`read Invoice`)
+pub fn total_payable(inv: read Invoice) -> i64 {
+    return inv.subtotal + inv.tax_amount
+}
+
+// Публичная функция печати квитанции
+pub fn print_invoice(inv: read Invoice) {
+    print("Счёт-фактура #")
+    print(inv.invoice_id)
+    print(" | Клиент: ")
+    println(inv.customer)
+
+    print("  Сумма без налога: ")
+    println(inv.subtotal)
+    print("  Налог (12%):      ")
+    println(inv.tax_amount)
+    print("  ИТОГО К ОПЛАТЕ:   ")
+    println(total_payable(read inv))
+}
+
+fn main() {
+    println("=== Модульная система и управление видимостью (pub) в APS ===")
+
+    let inv = create_invoice(5001, "ТОО ТехноПарк Алматы", 250000)
+    print_invoice(read inv)
+}

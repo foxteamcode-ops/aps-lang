@@ -1,0 +1,38 @@
+# Rust and Cargo build artifacts
+/target/
+Cargo.lock
+
+# Compiled binaries and debug symbols
+/bin/*.exe
+/bin/*.pdb
+/bin/*.ilk
+/bin/*.exp
+/bin/*.lib
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.o
+*.dll
+
+# Keep bin directory in git
+!/bin/.gitkeep
+
+# APS compiler build cache and intermediate LLVM files
+**/.aps_build/
+*.ll
+
+# Benchmark compiled outputs
+benchmarks/bin/*.exe
+benchmarks/bin/*.pdb
+benchmarks/stress_workload/bin/*.exe
+benchmarks/stress_workload/bin/*.pdb
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+[Dd]esktop.ini

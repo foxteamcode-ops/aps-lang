@@ -1,0 +1,166 @@
+// ============================================================================
+// Модуль: std.time
+// Описание: Время, интервалы и высокоточные таймеры:
+// `Duration`, `Instant`, `Stopwatch`, системные замеры наносекунд и миллисекунд.
+// ============================================================================
+
+module std.time
+
+pub const NANOS_PER_MICRO: i64 = 1000
+pub const NANOS_PER_MILLI: i64 = 1000000
+pub const NANOS_PER_SEC: i64 = 1000000000
+pub const MILLIS_PER_SEC: i64 = 1000
+
+/// Промежуток времени с наносекундной точностью (`Duration`)
+pub struct Duration {
+    pub total_nanos: i64
+}
+
+impl Duration {
+    pub fn from_nanos(ns: i64) -> Duration {
+        let safe_ns = if ns < 0 { 0 } else { ns }
+        return Duration {
+            total_nanos: safe_ns
+        }
+    }
+
+    pub fn from_micros(us: i64) -> Duration {
+        return Duration.from_nanos(us * NANOS_PER_MICRO)
+    }
+
+    pub fn from_millis(ms: i64) -> Duration {
+        return Duration.from_nanos(ms * NANOS_PER_MILLI)
+    }
+
+    pub fn from_secs(secs: i64) -> Duration {
+        return Duration.from_nanos(secs * NANOS_PER_SEC)
+    }
+
+    pub fn as_nanos(read self) -> i64 {
+        return self.total_nanos
+    }
+
+    pub fn as_micros(read self) -> i64 {
+        return self.total_nanos / NANOS_PER_MICRO
+    }
+
+    pub fn as_millis(read self) -> i64 {
+        return self.total_nanos / NANOS_PER_MILLI
+    }
+
+    pub fn as_secs(read self) -> i64 {
+        return self.total_nanos / NANOS_PER_SEC
+    }
+
+    pub fn is_zero(read self) -> bool {
+        return self.total_nanos == 0
+    }
+}
+
+/// Монотонная отметка времени (`Instant`) для замера задержек без скачков системных часов
+pub struct Instant {
+    pub timestamp_ns: i64
+}
+
+impl Instant {
+    pub fn now() -> Instant {
+        return Instant {
+            timestamp_ns: time_now_ns()
+        }
+    }
+
+    pub fn from_raw_ns(ns: i64) -> Instant {
+        return Instant {
+            timestamp_ns: ns
+        }
+    }
+
+    pub fn elapsed_since(read self, earlier: read Instant) -> Duration {
+        if self.timestamp_ns <= earlier.timestamp_ns {
+            return Duration.from_nanos(0)
+        }
+        return Duration.from_nanos(self.timestamp_ns - earlier.timestamp_ns)
+    }
+}
+
+/// Секундомер для профилирования участков кода (`Stopwatch`)
+pub struct Stopwatch {
+    pub start_ns: i64
+    pub accumulated_ns: i64
+    pub is_running: bool
+    pub lap_count: i64
+}
+
+impl Stopwatch {
+    pub fn start_new() -> Stopwatch {
+        return Stopwatch {
+            start_ns: time_now_ns(),
+            accumulated_ns: 0,
+            is_running: true,
+            lap_count: 0
+        }
+    }
+
+    pub fn record_lap(write self, simulated_delta_ns: i64) {
+        if self.is_running {
+            self.accumulated_ns += simulated_delta_ns
+            self.lap_count += 1
+        }
+    }
+
+    pub fn stop(write self) -> Duration {
+        self.is_running = false
+        return Duration.from_nanos(self.accumulated_ns)
+    }
+
+    pub fn reset(write self) {
+        self.accumulated_ns = 0
+        self.lap_count = 0
+        self.is_running = false
+    }
+}
+
+/// Текущее системное время в миллисекундах
+pub fn now_millis() -> i64 {
+    return time_now_ms()
+}
+
+/// Текущее системное время в наносекундах
+pub fn now_nanos() -> i64 {
+    return time_now_ns()
+}
+
+/// Блокирующая пауза текущего потока на `ms` миллисекунд
+pub fn sleep_for_ms(ms: i64) {
+    if ms > 0 {
+        sleep_ms(ms)
+    }
+}
+
+/// Самопроверка модуля `std.time`
+pub fn self_test() -> bool {
+    let d1 = Duration.from_millis(2500)
+    assert_eq(d1.as_secs(), 2)
+    assert_eq(d1.as_millis(), 2500)
+    assert(!d1.is_zero())
+
+    let t0 = Instant.from_raw_ns(1000000)
+    let t1 = Instant.from_raw_ns(6000000)
+    let diff = t1.elapsed_since(read t0)
+    assert_eq(diff.as_millis(), 5)
+
+    var sw = Stopwatch.start_new()
+    sw.record_lap(2000000)
+    sw.record_lap(3000000)
+    let total = sw.stop()
+    assert_eq(sw.lap_count, 2)
+    assert_eq(total.as_millis(), 5)
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.time] self_test passed")
+}

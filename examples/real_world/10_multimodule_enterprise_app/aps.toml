@@ -1,0 +1,10 @@
+[package]
+name = "aps_enterprise_fleet"
+version = "1.0.0"
+edition = "2026"
+
+[dependencies]
+aps-http = "1.2.0"
+aps-json = "1.1.4"
+aps-sql = "0.9.2"
+aps-log = "0.8.0"

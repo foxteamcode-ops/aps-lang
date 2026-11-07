@@ -1,0 +1,296 @@
+// ============================================================================
+// Файл: examples/real_world/09_rest_api_service.aps
+// Описание: Полноценный backend REST API сервис диспетчеризации водителей,
+// заказов и финансового реестра (`Driver`, `RideOrder`, `Ledger`),
+// обрабатывающий маршруты:
+//   - `POST /drivers`  (регистрация и активация водителя)
+//   - `POST /orders`   (назначение и расчёт заказа с комиссией платформы)
+//   - `POST /transfer` (межсчетовой перевод с полем-независимым заимствованием)
+//   - `GET  /stats`    (выгрузка сводных показателей финансовой книги `Ledger`)
+// ============================================================================
+
+module rest_api_service
+
+import std.io
+import std.net
+
+// Каноническая доменная структура водителя `Driver`
+struct Driver {
+    id: i64
+    name: String
+    balance: i64
+    completed_orders: i64
+    is_online: bool
+}
+
+// Структура заказа на поездку `RideOrder`
+struct RideOrder {
+    order_id: i64
+    passenger_name: String
+    pickup_zone: String
+    dropoff_zone: String
+    distance_km: i64
+    base_fare: i64
+}
+
+// Финансовая книга платформы `Ledger` (с разделением резервного и комиссионного пулов
+// для демонстрации Field-Disjoint Borrowing в AMA!)
+struct Ledger {
+    escrow_pool: i64
+    commission_revenue: i64
+    total_settled_orders: i64
+    total_transfers: i64
+    rejected_requests: i64
+}
+
+// Ответ REST API эндпоинта
+struct ApiResponse {
+    http_status: i64
+    endpoint: String
+    result_value: i64
+    message: String
+}
+
+// Вспомогательная функция перераспределения средств между независимыми полями одной структуры
+// Демонстрирует Field-Disjoint Borrowing: `write ledger.escrow_pool` и `write ledger.commission_revenue`
+fn split_escrow_to_commission(
+    escrow: write i64,
+    commission: write i64,
+    fee_amount: i64
+) {
+    escrow -= fee_amount
+    commission += fee_amount
+}
+
+// Маршрут `POST /drivers`: регистрация и верификация нового водителя
+fn handle_post_driver(
+    id: i64,
+    name: String,
+    initial_deposit: i64
+) -> Result<Driver, String> {
+    let d = Driver {
+        id: id,
+        name: name,
+        balance: initial_deposit,
+        completed_orders: 0,
+        is_online: true
+    }
+    var res: Result<Driver, String> = Ok(d)
+    if id <= 0 {
+        res = Err("Bad Request: идентификатор водителя должен быть > 0")
+    } else if initial_deposit < 0 {
+        res = Err("Bad Request: начальный депозит не может быть отрицательным")
+    }
+    return res
+}
+
+// Маршрут `POST /orders`: диспетчеризация и расчёт поездки в регионе `api_arena`
+fn handle_post_order(
+    driver: write Driver,
+    ledger: write Ledger,
+    order: read RideOrder,
+    platform_fee_pct: i64
+) -> ApiResponse {
+    var status: i64 = 200
+    var net_driver_payout: i64 = 0
+    var msg = "Order settled"
+
+    region api_arena {
+        if !driver.is_online {
+            ledger.rejected_requests += 1
+            status = 409
+            msg = "Conflict: водитель находится в статусе offline"
+        } else if order.distance_km <= 0 || order.base_fare <= 0 {
+            ledger.rejected_requests += 1
+            status = 400
+            msg = "Bad Request: некорректные параметры маршрута поездки"
+        } else {
+            let gross_fare = order.base_fare + (order.distance_km * 120)
+            let fee = (gross_fare * platform_fee_pct) / 100
+            net_driver_payout = gross_fare - fee
+
+            // Сначала зачисляем всю сумму в эскроу-пул
+            ledger.escrow_pool += gross_fare
+
+            // Выделяем комиссию платформы через Field-Disjoint Borrowing двух разных полей `ledger`!
+            split_escrow_to_commission(
+                write ledger.escrow_pool,
+                write ledger.commission_revenue,
+                fee
+            )
+
+            // Выплачиваем водителю чистый заработок из эскроу-пула
+            ledger.escrow_pool -= net_driver_payout
+            driver.balance += net_driver_payout
+            driver.completed_orders += 1
+            ledger.total_settled_orders += 1
+        }
+    }
+
+    return ApiResponse {
+        http_status: status,
+        endpoint: "POST /orders",
+        result_value: net_driver_payout,
+        message: msg
+    }
+}
+
+// Маршрут `POST /transfer`: P2P-перевод между водителями автопарка
+fn handle_post_transfer(
+    sender: write Driver,
+    receiver: write Driver,
+    ledger: write Ledger,
+    amount: i64
+) -> ApiResponse {
+    var status: i64 = 200
+    var res_val: i64 = 0
+    var msg = "Transfer completed"
+
+    if amount <= 0 {
+        ledger.rejected_requests += 1
+        status = 400
+        res_val = 0
+        msg = "Bad Request: сумма перевода должна быть положительной"
+    } else if sender.balance < amount {
+        ledger.rejected_requests += 1
+        status = 422
+        res_val = sender.balance
+        msg = "Unprocessable Entity: недостаточно средств у отправителя"
+    } else {
+        sender.balance -= amount
+        receiver.balance += amount
+        ledger.total_transfers += 1
+        status = 200
+        res_val = sender.balance
+    }
+
+    return ApiResponse {
+        http_status: status,
+        endpoint: "POST /transfer",
+        result_value: res_val,
+        message: msg
+    }
+}
+
+// Маршрут `GET /stats`: печать текущего состояния книги учёта и водителей
+fn handle_get_stats(
+    d1: read Driver,
+    d2: read Driver,
+    ledger: read Ledger
+) {
+    println("------------------------------------------------------------")
+    println("GET /stats -> 200 OK (Сводка REST API сервиса диспетчеризации)")
+    println("------------------------------------------------------------")
+    print("  Водитель #")
+    print(d1.id)
+    print(" (")
+    print(d1.name)
+    print("): баланс = ")
+    print(d1.balance)
+    print(" KZT, заказов = ")
+    println(d1.completed_orders)
+
+    print("  Водитель #")
+    print(d2.id)
+    print(" (")
+    print(d2.name)
+    print("): баланс = ")
+    print(d2.balance)
+    print(" KZT, заказов = ")
+    println(d2.completed_orders)
+
+    print("  Выполнено заказов (Ledger): ")
+    println(ledger.total_settled_orders)
+    print("  Выполнено P2P-переводов   : ")
+    println(ledger.total_transfers)
+    print("  Выручка комиссии (KZT)    : ")
+    println(ledger.commission_revenue)
+    print("  Остаток эскроу-пула (KZT) : ")
+    println(ledger.escrow_pool)
+    print("  Отклонено запросов (4xx)  : ")
+    println(ledger.rejected_requests)
+    println("------------------------------------------------------------")
+}
+
+fn log_api_response(resp: read ApiResponse) {
+    print("  [REST ")
+    print(resp.endpoint)
+    print("] HTTP ")
+    print(resp.http_status)
+    print(" | ")
+    print(resp.message)
+    print(" (значение: ")
+    print(resp.result_value)
+    println(")")
+}
+
+fn main() {
+    println("=== APS Real-World #09: Backend REST API сервис диспетчеризации ===")
+
+    var ledger = Ledger {
+        escrow_pool: 0,
+        commission_revenue: 0,
+        total_settled_orders: 0,
+        total_transfers: 0,
+        rejected_requests: 0
+    }
+
+    var driver_alibek = Driver {
+        id: 1,
+        name: "Alibek",
+        balance: 1000,
+        completed_orders: 0,
+        is_online: true
+    }
+
+    var driver_timur = Driver {
+        id: 2,
+        name: "Timur",
+        balance: 500,
+        completed_orders: 0,
+        is_online: true
+    }
+
+    // 1. Вызовы `POST /drivers`
+    match handle_post_driver(1, "Alibek", 1000) {
+        Ok(_) => println("  [REST POST /drivers] HTTP 201 | Водитель Alibek зарегистрирован"),
+        Err(_) => println("  [REST POST /drivers] Ошибка регистрации")
+    }
+    match handle_post_driver(2, "Timur", 500) {
+        Ok(_) => println("  [REST POST /drivers] HTTP 201 | Водитель Timur зарегистрирован"),
+        Err(_) => println("  [REST POST /drivers] Ошибка регистрации")
+    }
+
+    // 2. Вызовы `POST /orders` (комиссия платформы 10%)
+    let order1 = RideOrder {
+        order_id: 9001,
+        passenger_name: "Aigerim",
+        pickup_zone: "Медеу",
+        dropoff_zone: "Аэропорт Алматы",
+        distance_km: 25,
+        base_fare: 1000
+    }
+    let r_ord1 = handle_post_order(write driver_alibek, write ledger, read order1, 10)
+    log_api_response(read r_ord1)
+
+    let order2 = RideOrder {
+        order_id: 9002,
+        passenger_name: "Sanzhar",
+        pickup_zone: "Достык Плаза",
+        dropoff_zone: "Парк Первого Президента",
+        distance_km: 10,
+        base_fare: 800
+    }
+    let r_ord2 = handle_post_order(write driver_timur, write ledger, read order2, 10)
+    log_api_response(read r_ord2)
+
+    // 3. Вызовы `POST /transfer` (успешный перевод и отклонение при нехватке средств)
+    let r_tx1 = handle_post_transfer(write driver_alibek, write driver_timur, write ledger, 1200)
+    log_api_response(read r_tx1)
+
+    let r_tx2 = handle_post_transfer(write driver_timur, write driver_alibek, write ledger, 500000)
+    log_api_response(read r_tx2)
+
+    // 4. Вызов `GET /stats`
+    handle_get_stats(read driver_alibek, read driver_timur, read ledger)
+}

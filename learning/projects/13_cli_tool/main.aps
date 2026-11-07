@@ -1,0 +1,1 @@
+fn hash_num(x: i64) -> i64 { x * 1099511628211 } fn main() { let h = hash_num(42); println(h) }

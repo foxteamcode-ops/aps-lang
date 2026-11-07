@@ -1,0 +1,1 @@
+struct HttpRes { status: i64, body: String } fn main() { region req_arena { let r = req_arena.alloc(HttpRes { status: 200, body: "OK" }); println(r.status) } }

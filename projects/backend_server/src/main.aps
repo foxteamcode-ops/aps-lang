@@ -1,0 +1,48 @@
+// ============================================================================
+// Проект: APS Hyperion Real-Time HTTP Web Server (v1.0.0)
+// Модель памяти: AMA (Adaptive Memory Architecture, Zero-GC)
+// Реальный сокет: TCP/IP Port 8080 (http://localhost:8080)
+// Режим работы: Непрерывный серверный цикл (Пока не остановлен через Ctrl+C)
+// ============================================================================
+
+module aps_backend_server
+
+fn main() {
+    defer println("\n[defer] Сессия сервера штатно закрыта, порт 8080 освобождён.")
+
+    println("==================================================================")
+    println("      APS HYPERION NATIVE HTTP SERVER (v1.0.0 RELEASE -O3)        ")
+    println("      Zero-GC Architecture | Real WinSock / BSD TCP Socket        ")
+    println("==================================================================")
+
+    let port: i64 = 8080
+    let server_fd = aps_tcp_listen(port)
+
+    if server_fd >= 0 {
+        println("[STATUS] Сервер успешно запущен на порту 8080!")
+        println("[LINK]   Откройте в любом браузере: http://localhost:8080")
+        println("[INFO]   Сервер работает непрерывно (пока вы не нажмёте Ctrl+C).")
+        println("[INFO]   Все входящие HTTP-запросы логируются ниже в реальном времени:")
+        println("------------------------------------------------------------------")
+
+        let response_body = "{\"status\": \"ONLINE\", \"server\": \"APS Hyperion v1.0.0\", \"language\": \"APS (Advanced Performance Systems)\", \"compiler\": \"LLVM 22 (-O3)\", \"memory_model\": \"AMA Zero-GC\", \"message\": \"Привет из реального веб-сервера на языке APS!\"}\n"
+
+        var requests_handled: i64 = 0
+        var running: bool = true
+
+        while running {
+            // Ожидание входящего клиентского TCP-соединения (непрерывный цикл)
+            let success = aps_tcp_accept_http(server_fd, response_body)
+            if success > 0 {
+                requests_handled += 1
+                print("  [APS-METRICS] Всего успешно обработано клиентских запросов: ")
+                println(requests_handled)
+            }
+        }
+
+        aps_tcp_close(server_fd)
+    } else {
+        println("[ERROR] Не удалось открыть TCP-порт 8080!")
+        println("Возможно, порт уже занят другим приложением.")
+    }
+}

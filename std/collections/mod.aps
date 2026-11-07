@@ -1,0 +1,204 @@
+// ============================================================================
+// Модуль: std.collections
+// Описание: Динамические коллекции под управлением AMA:
+// `Vec<T>`, `HashMap<K, V>`, `HashSet<T>`, `Queue<T>`, `Stack<T>`, `RingBuffer<T>`.
+// ============================================================================
+
+module std.collections
+
+pub const DEFAULT_COLLECTION_CAPACITY: i64 = 16
+
+/// Очередь FIFO (`Queue<T>`) с отслеживанием головы, хвоста и размера
+pub struct Queue<T> {
+    pub head_idx: i64
+    pub tail_idx: i64
+    pub count: i64
+    pub capacity: i64
+    pub last_item: Option<T>
+}
+
+impl<T> Queue<T> {
+    pub fn new(capacity: i64) -> Queue<T> {
+        let cap = if capacity < 4 { 4 } else { capacity }
+        return Queue {
+            head_idx: 0,
+            tail_idx: 0,
+            count: 0,
+            capacity: cap,
+            last_item: None
+        }
+    }
+
+    pub fn enqueue(write self, item: T) -> bool {
+        if self.count >= self.capacity {
+            self.capacity = self.capacity * 2
+        }
+        self.tail_idx = (self.tail_idx + 1) % self.capacity
+        self.count += 1
+        self.last_item = Some(item)
+        return true
+    }
+
+    pub fn dequeue(write self) -> Option<T> {
+        if self.count <= 0 {
+            return None
+        }
+        self.head_idx = (self.head_idx + 1) % self.capacity
+        self.count -= 1
+        return self.last_item
+    }
+
+    pub fn len(read self) -> i64 {
+        return self.count
+    }
+
+    pub fn is_empty(read self) -> bool {
+        return self.count == 0
+    }
+}
+
+/// Стек LIFO (`Stack<T>`)
+pub struct Stack<T> {
+    pub count: i64
+    pub capacity: i64
+    pub top_item: Option<T>
+}
+
+impl<T> Stack<T> {
+    pub fn new(capacity: i64) -> Stack<T> {
+        let cap = if capacity < 4 { 4 } else { capacity }
+        return Stack {
+            count: 0,
+            capacity: cap,
+            top_item: None
+        }
+    }
+
+    pub fn push_item(write self, val: T) {
+        if self.count >= self.capacity {
+            self.capacity = self.capacity * 2
+        }
+        self.count += 1
+        self.top_item = Some(val)
+    }
+
+    pub fn pop_item(write self) -> Option<T> {
+        if self.count <= 0 {
+            return None
+        }
+        self.count -= 1
+        return self.top_item
+    }
+
+    pub fn len(read self) -> i64 {
+        return self.count
+    }
+
+    pub fn is_empty(read self) -> bool {
+        return self.count == 0
+    }
+}
+
+/// Кольцевой буфер фиксированной ёмкости (`RingBuffer<T>`) для телеметрии и потоков
+pub struct RingBuffer<T> {
+    pub capacity: i64
+    pub size: i64
+    pub read_pos: i64
+    pub write_pos: i64
+    pub overwritten_count: i64
+}
+
+impl<T> RingBuffer<T> {
+    pub fn with_capacity(cap: i64) -> RingBuffer<T> {
+        let safe_cap = if cap < 2 { 2 } else { cap }
+        return RingBuffer {
+            capacity: safe_cap,
+            size: 0,
+            read_pos: 0,
+            write_pos: 0,
+            overwritten_count: 0
+        }
+    }
+
+    pub fn push_overwrite(write self, _item: T) {
+        self.write_pos = (self.write_pos + 1) % self.capacity
+        if self.size < self.capacity {
+            self.size += 1
+        } else {
+            self.read_pos = (self.read_pos + 1) % self.capacity
+            self.overwritten_count += 1
+        }
+    }
+
+    pub fn is_full(read self) -> bool {
+        return self.size == self.capacity
+    }
+
+    pub fn len(read self) -> i64 {
+        return self.size
+    }
+}
+
+/// Создание нового динамического вектора `Vec<i64>`
+pub fn vec_i64_new() -> Vec<i64> {
+    let v: Vec<i64> = Vec.new()
+    return v
+}
+
+/// Создание новой хеш-таблицы `HashMap<String, i64>`
+pub fn map_str_i64_new() -> HashMap<String, i64> {
+    let m = HashMap.new() as HashMap<String, i64>
+    return m
+}
+
+/// Создание нового хеш-множества `HashSet<i64>`
+pub fn set_i64_new() -> HashSet<i64> {
+    let s = HashSet.new() as HashSet<i64>
+    return s
+}
+
+/// Вычисление суммы элементов среза `[i64]`
+pub fn slice_sum_i64(items: read [i64]) -> i64 {
+    var total: i64 = 0
+    for i in 0..items.len() {
+        total += items[i]
+    }
+    return total
+}
+
+/// Самопроверка модуля `std.collections`
+pub fn self_test() -> bool {
+    var q = Queue<i64>.new(8)
+    assert(q.is_empty())
+    q.enqueue(10)
+    q.enqueue(20)
+    assert_eq(q.len(), 2)
+    let _ = q.dequeue()
+    assert_eq(q.len(), 1)
+
+    var st = Stack<i64>.new(8)
+    st.push_item(100)
+    st.push_item(200)
+    assert_eq(st.len(), 2)
+    let _ = st.pop_item()
+    assert_eq(st.len(), 1)
+
+    var ring = RingBuffer<i64>.with_capacity(3)
+    ring.push_overwrite(1)
+    ring.push_overwrite(2)
+    ring.push_overwrite(3)
+    assert(ring.is_full())
+    ring.push_overwrite(4)
+    assert_eq(ring.overwritten_count, 1)
+
+    let arr = [5, 10, 15, 20]
+    assert_eq(slice_sum_i64(read arr), 50)
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.collections] self_test passed")
+}

@@ -1,0 +1,67 @@
+// ============================================================================
+// Файл: examples/real_world/10_multimodule_enterprise_app/src/service.aps
+// Описание: Сервисный слой бизнес-логики (`module service`), координирующий
+// расчёт корпоративных поездок, удержание налогов и выплаты водителям.
+// ============================================================================
+
+module service
+
+import domain
+import repository
+
+pub struct EnterpriseConfig {
+    pub company_name: String
+    pub tax_rate_bps: i64
+    pub commission_bps: i64
+    pub min_payout_kzt: i64
+}
+
+pub struct SettlementResult {
+    pub order_id: i64
+    pub gross_fare: i64
+    pub tax_withheld: i64
+    pub commission_withheld: i64
+    pub driver_net_payout: i64
+}
+
+pub fn process_corporate_trip(
+    cfg: read Shared<EnterpriseConfig>,
+    order_id: i64,
+    distance_km: i64,
+    rate_per_km: i64
+) -> Result<SettlementResult, String> {
+    let gross = distance_km * rate_per_km
+    let tax = (gross * cfg.tax_rate_bps) / 10000
+    let comm = (gross * cfg.commission_bps) / 10000
+    let net = gross - tax - comm
+
+    let settlement = SettlementResult {
+        order_id: order_id,
+        gross_fare: gross,
+        tax_withheld: tax,
+        commission_withheld: comm,
+        driver_net_payout: net
+    }
+
+    var res: Result<SettlementResult, String> = Ok(settlement)
+    if distance_km <= 0 || rate_per_km <= 0 {
+        res = Err("Некорректные параметры корпоративного заказа")
+    } else if net < cfg.min_payout_kzt {
+        res = Err("Чистая выплата ниже минимального корпоративного порога")
+    }
+
+    return res
+}
+
+pub fn print_settlement(res: read SettlementResult) {
+    print("  [Service Order #")
+    print(res.order_id)
+    print("] Валовая сумма: ")
+    print(res.gross_fare)
+    print(" | Налог: ")
+    print(res.tax_withheld)
+    print(" | Комиссия: ")
+    print(res.commission_withheld)
+    print(" | К выплате водителю: ")
+    println(res.driver_net_payout)
+}

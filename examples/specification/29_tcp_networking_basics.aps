@@ -1,0 +1,77 @@
+// ============================================================================
+// Файл: 29_tcp_networking_basics.aps
+// Описание: Сетевое взаимодействие по протоколу TCP (`std.net`): настройка
+// серверного сокета `TcpListener`, установка клиентского соединения `TcpStream`,
+// обмен кадрами данных и детерминированное закрытие сокетов через `defer`.
+// ============================================================================
+
+module tcp_networking_demo
+
+import std.net
+import std.io
+
+struct EndpointConfig {
+    host: String
+    port: u16
+    read_timeout_ms: i64
+}
+
+// Обработка одного клиентского подключения на стороне сервера
+fn handle_client_connection(stream: write TcpStream) -> Result<i64, String> {
+    // Читаем входящий запрос в локальный буфер
+    let request_line = stream.read_line()?
+    print("  [TCP Сервер] Получен запрос: ")
+    println(request_line)
+
+    // Формируем и отправляем ответ
+    let response = "ACK: APS Telemetry Node Ready\n"
+    let sent_bytes = stream.write_str(read response)?
+    stream.flush()?
+
+    return Ok(sent_bytes)
+}
+
+// Клиентская функция отправки команды
+fn send_ping_command(cfg: read EndpointConfig) -> Result<String, String> {
+    var stream = TcpStream.connect(read cfg.host, cfg.port, cfg.read_timeout_ms)?
+    defer {
+        stream.close()
+    }
+
+    let ping_msg = "PING node=almaty-01\n"
+    stream.write_str(read ping_msg)?
+    stream.flush()?
+
+    let reply = stream.read_line()?
+    return Ok(reply)
+}
+
+fn main() {
+    println("=== Сетевое взаимодействие по TCP (std.net) в APS ===")
+
+    let endpoint = EndpointConfig {
+        host: "127.0.0.1",
+        port: 9090,
+        read_timeout_ms: 2000
+    }
+
+    print("Настроен TCP-эндпоинт: ")
+    print(endpoint.host)
+    print(":")
+    println(endpoint.port)
+
+    // Пример инициализации слушающего сокета с проверкой результата
+    match TcpListener.bind(read endpoint.host, endpoint.port) {
+        Ok(listener) => {
+            var srv = listener
+            defer {
+                srv.close()
+            }
+            println("TCPListener успешно привязан к порту 9090.")
+        }
+        Err(bind_err) => {
+            print("Примечание сетевого стека: ")
+            println(bind_err)
+        }
+    }
+}

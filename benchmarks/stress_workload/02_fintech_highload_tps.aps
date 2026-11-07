@@ -1,0 +1,97 @@
+// ============================================================================
+// Стресс-тест #2: Высоконагруженный транзакционный процессинг (Fintech Highload)
+// Нагрузка: 1 000 000 ACID финансовых транзакций в реальном времени
+// Метрики: TPS (Transactions/Sec), Задержка (нс/tx), Сохранение баланса
+// ============================================================================
+
+module fintech_highload_tps
+
+struct BankLedger {
+    total_transactions: i64
+    settled_count: i64
+    rejected_count: i64
+    total_fees_collected: i64
+    total_volume_kzt: i64
+}
+
+fn process_transaction(
+    tx_id: i64,
+    ledger: write BankLedger
+) -> i64 {
+    // Детерминированные параметры транзакции на основе псевдослучайного генератора
+    let amount = (tx_id * 104729) % 50000 + 100
+    let fee_bps: i64 = 15 // 0.15% комиссия платформы
+    let fee = (amount * fee_bps) / 10000
+
+    ledger.total_transactions += 1
+
+    // Симуляция бизнес-правил антифрода и лимитов
+    if amount > 49000 {
+        ledger.rejected_count += 1
+        return 0
+    } else {
+        let net_payout = amount - fee
+        ledger.settled_count += 1
+        ledger.total_fees_collected += fee
+        ledger.total_volume_kzt += net_payout
+        return net_payout
+    }
+}
+
+fn main() {
+    println("==================================================================")
+    println("      APS FINTECH HIGHLOAD ENGINE: 1,000,000 TRANSACTIONS         ")
+    println("      Zero-GC Architecture | Pure Scalar & LLVM O3 Execution      ")
+    println("==================================================================")
+
+    let total_tx: i64 = 1000000
+    print("Целевой объем транзакций: ")
+    println(total_tx)
+    println("Старт непрерывного транзакционного конвейера...")
+    println("------------------------------------------------------------------")
+
+    var ledger = BankLedger {
+        total_transactions: 0,
+        settled_count: 0,
+        rejected_count: 0,
+        total_fees_collected: 0,
+        total_volume_kzt: 0
+    }
+
+    let start_ns = aps_time_now_ns()
+
+    var i: i64 = 0
+    while i < total_tx {
+        let _ = process_transaction(i, write ledger)
+        i += 1
+    }
+
+    let end_ns = aps_time_now_ns()
+    let elapsed_ns = end_ns - start_ns
+    let elapsed_ms = elapsed_ns / 1000000
+    let latency_ns_per_tx = if total_tx > 0 { elapsed_ns / total_tx } else { 0 }
+    let tps = if elapsed_ms > 0 { (total_tx * 1000) / elapsed_ms } else { 99999999 }
+
+    println("==================================================================")
+    println("              ИТОГОВЫЙ ОТЧЁТ ТРАНЗАКЦИОННОЙ НАГРУЗКИ              ")
+    println("==================================================================")
+    print("  Всего обработано транзакций : ")
+    println(ledger.total_transactions)
+    print("  Успешно проведено (Settled)  : ")
+    println(ledger.settled_count)
+    print("  Отклонено антифродом         : ")
+    println(ledger.rejected_count)
+    print("  Общее время выполнения (мс)  : ")
+    println(elapsed_ms)
+    print("  Средняя задержка на 1 tx     : ")
+    print(latency_ns_per_tx)
+    println(" нс (наносекунд!)")
+    print("  ПРОПУСКНАЯ СПОСОБНОСТЬ (TPS) : ")
+    print(tps)
+    println(" транзакций / сек!")
+    print("  Суммарная комиссия (KZT)     : ")
+    println(ledger.total_fees_collected)
+    print("  Контрольная сумма объёма KZT : ")
+    println(ledger.total_volume_kzt)
+    println("==================================================================")
+}

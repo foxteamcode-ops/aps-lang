@@ -1,0 +1,79 @@
+// ============================================================================
+// Файл: 26_multithreading_and_channels.aps
+// Описание: Многопоточность без гонок данных (Fearless Concurrency) в APS.
+// Передача сообщений между потоками через типизированные каналы `Channel<T>`
+// с передачей владения (`take`) и разделяемой неизменяемой памяти (`Shared<T>`).
+// ============================================================================
+
+module channels_demo
+
+import std.sync
+import std.thread
+
+struct OrderJob {
+    order_id: i64
+    driver_id: i64
+    fare_amount: i64
+}
+
+// Функция рабочего потока: принимает канал-приёмник и обрабатывает заказы
+fn worker_loop(rx: take Receiver<OrderJob>, worker_tag: String) -> i64 {
+    var processed_total: i64 = 0
+
+    // Получаем сообщения из канала до его закрытия
+    while true {
+        match rx.recv() {
+            Some(job) => {
+                print("  [")
+                print(worker_tag)
+                print("] Обработан заказ #")
+                print(job.order_id)
+                print(" для водителя #")
+                print(job.driver_id)
+                print(", сумма: ")
+                println(job.fare_amount)
+
+                processed_total += job.fare_amount
+            }
+            None => {
+                // Канал закрыт и пуст — выходим из цикла
+                break
+            }
+        }
+    }
+
+    return processed_total
+}
+
+fn main() {
+    println("=== Многопоточность и обмен сообщениями через каналы в APS ===")
+
+    // Создаём типизированный ограниченно-буферизованный канал ёмкостью 16 элементов
+    let ch = channel<OrderJob>(16)
+    let tx = ch.sender
+    let rx = ch.receiver
+
+    // Запускаем рабочий поток, передавая ему владение `rx` (`take rx`)
+    let worker_handle = spawn_thread(|| -> i64 {
+        return worker_loop(take rx, "Worker-Thread-1")
+    })
+
+    // Формируем заказы в главном потоке и передаём владение в канал (`tx.send(take job)`).
+    // После отправки главный поток больше не может обратиться к отправленному объекту,
+    // что полностью исключает гонки данных (Data Races) на этапе компиляции!
+    let job1 = OrderJob { order_id: 1001, driver_id: 1, fare_amount: 1500 }
+    let job2 = OrderJob { order_id: 1002, driver_id: 2, fare_amount: 2200 }
+    let job3 = OrderJob { order_id: 1003, driver_id: 1, fare_amount: 1800 }
+
+    tx.send(take job1)
+    tx.send(take job2)
+    tx.send(take job3)
+
+    // Закрываем передатчик, сигнализируя рабочему потоку об окончании потока задач
+    tx.close()
+
+    // Ожидаем завершения потока и получаем итоговую сумму
+    let total_revenue = worker_handle.join()
+    print("Все заказы обработаны. Суммарный оборот: ")
+    println(total_revenue)
+}

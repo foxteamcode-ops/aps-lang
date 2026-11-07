@@ -1,0 +1,97 @@
+// ============================================================================
+// Файл: 21_ama_weak_references_and_graphs.aps
+// Описание: Построение графов, деревьев с обратными ссылками (parent <-> child)
+// и предотвращение циклических утечек памяти в AMA с помощью слабых ссылок
+// `Weak<T>` и индексных дескрипторов регионов.
+// ============================================================================
+
+module ama_weak_and_graphs_demo
+
+import std.mem
+
+// Узел дерева подразделений: родитель удерживает сильную ссылку `Shared<Department>`,
+// а дочерний узел хранит невладеющую слабую ссылку `Weak<Department>` на родителя,
+// что гарантирует отсутствие циклов сильных ссылок.
+struct Department {
+    id: i64
+    title: String
+}
+
+struct ChildUnit {
+    unit_id: i64
+    unit_name: String
+    parent_ref: Weak<Department>
+}
+
+// Представление ориентированного графа внутри региона через индексные дескрипторы
+struct GraphVertex {
+    id: i64
+    label: String
+    first_neighbor_idx: i64
+}
+
+fn inspect_child_unit(unit: read ChildUnit) {
+    print("Подразделение #")
+    print(unit.unit_id)
+    print(" '")
+    print(unit.unit_name)
+    println("':")
+
+    // Для доступа к объекту по слабой ссылке `Weak<T>` вызывается `.upgrade()`,
+    // возвращающий `Option<Shared<T>>`.
+    match unit.parent_ref.upgrade() {
+        Some(parent_dept) => {
+            print("  -> Родительский департамент активен: '")
+            print(parent_dept.title)
+            println("'")
+        }
+        None => {
+            println("  -> Родительский департамент уже выгружен из памяти")
+        }
+    }
+}
+
+fn main() {
+    println("=== AMA: Слабые ссылки Weak<T> и графы без утечек памяти ===")
+
+    // 1. Создаём родительский объект в разделяемой памяти `Shared<Department>`
+    let root_dept = share(Department {
+        id: 1,
+        title: "Департамент системной разработки APS"
+    })
+
+    // 2. Создаём слабую ссылку `Weak<Department>` через `.downgrade()`
+    let weak_parent = root_dept.downgrade()
+
+    let compiler_team = ChildUnit {
+        unit_id: 101,
+        unit_name: "Группа компилятора и LLVM",
+        parent_ref: weak_parent
+    }
+
+    // Пока `root_dept` жив, `upgrade()` успешно возвращает `Some(Shared<Department>)`
+    inspect_child_unit(read compiler_team)
+
+    // 3. Демонстрация циклического графа внутри региона `region`
+    region graph_arena {
+        let vertices = [
+            GraphVertex { id: 0, label: "Node-A", first_neighbor_idx: 1 },
+            GraphVertex { id: 1, label: "Node-B", first_neighbor_idx: 2 },
+            GraphVertex { id: 2, label: "Node-C (цикл на A)", first_neighbor_idx: 0 }
+        ]
+
+        print("Построен циклический граф в регионе из ")
+        print(vertices.len())
+        println(" вершин:")
+
+        for i in 0..vertices.len() {
+            let v = read vertices[i]
+            let next_v = read vertices[v.first_neighbor_idx]
+            print("  ")
+            print(v.label)
+            print(" -> ")
+            println(next_v.label)
+        }
+    }
+    println("Регион графа освобождён целиком без утечек памяти!")
+}

@@ -1,0 +1,80 @@
+// ============================================================================
+// Файл: 18_ama_field_disjoint_borrowing.aps
+// Описание: Расщепление прав доступа по непересекающимся полям структуры
+// (Field-Disjoint Projection) в модели памяти AMA.
+// Компилятор отслеживает пути доступа (`a.stats`, `a.wallet`, `a.profile`)
+// и разрешает одновременный `write` и `read` к разным полям одной структуры.
+// ============================================================================
+
+module ama_field_disjoint_demo
+
+struct Wallet {
+    balance: i64
+    bonus_points: i64
+}
+
+struct TripStats {
+    completed_trips: i64
+    total_distance_km: i64
+}
+
+struct DriverState {
+    id: i64
+    name: String
+    wallet: Wallet
+    stats: TripStats
+}
+
+// Функция одновременно модифицирует `wallet` (`write Wallet`) и читает `stats` (`read TripStats`)
+fn settle_trip_reward(wallet: write Wallet, stats: read TripStats, base_fare: i64) {
+    wallet.balance += base_fare
+    // Если выполнено более 10 поездок, начисляем повышенные бонусы
+    if stats.completed_trips >= 10 {
+        wallet.bonus_points += 50
+    } else {
+        wallet.bonus_points += 10
+    }
+}
+
+// Одновременная модификация двух разных полей (`write Wallet` и `write TripStats`)
+fn record_completed_trip(
+    wallet: write Wallet,
+    stats: write TripStats,
+    distance_km: i64,
+    fare: i64
+) {
+    stats.completed_trips += 1
+    stats.total_distance_km += distance_km
+    wallet.balance += fare
+}
+
+fn main() {
+    println("=== AMA: Независимый доступ к разным полям структуры (Field-Disjoint) ===")
+
+    var state = DriverState {
+        id: 1,
+        name: "Alibek",
+        wallet: Wallet { balance: 1000, bonus_points: 100 },
+        stats: TripStats { completed_trips: 9, total_distance_km: 120 }
+    }
+
+    // 1. Передаём `write state.wallet` и `write state.stats` в один вызов!
+    // Поскольку пути `.wallet` и `.stats` не пересекаются (disjoint paths),
+    // анализатор AMA подтверждает полное отсутствие алиасинга.
+    record_completed_trip(write state.wallet, write state.stats, 15, 1800)
+
+    // 2. Передаём `write state.wallet` и `read state.stats` одновременно
+    settle_trip_reward(write state.wallet, read state.stats, 400)
+
+    print("Водитель: ")
+    println(state.name)
+    print("Выполнено поездок: ")
+    print(state.stats.completed_trips)
+    print(", общая дистанция (км): ")
+    println(state.stats.total_distance_km)
+
+    print("Баланс кошелька: ")
+    print(state.wallet.balance)
+    print(", бонусные баллы: ")
+    println(state.wallet.bonus_points)
+}

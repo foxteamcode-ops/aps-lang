@@ -1,0 +1,75 @@
+// ============================================================================
+// Файл: 08_loops_and_iterators.aps
+// Описание: Циклы `for i in start..end`, `while`, бесконечный цикл `loop`,
+// а также управление потоком выполнения с помощью `break` и `continue`.
+// ============================================================================
+
+module loops_demo
+
+fn is_prime(n: i64) -> bool {
+    if n < 2 {
+        return false
+    }
+    var d: i64 = 2
+    while d * d <= n {
+        if n % d == 0 {
+            return false
+        }
+        d += 1
+    }
+    return true
+}
+
+fn main() {
+    println("=== Циклы и итераторы в APS ===")
+
+    // 1. Цикл `for` по полуоткрытому диапазону `0..10` (от 0 до 9 включительно)
+    var sum_even: i64 = 0
+    for i in 0..10 {
+        if i % 2 != 0 {
+            // Пропускаем нечётные числа
+            continue
+        }
+        sum_even += i
+    }
+    print("Сумма чётных чисел в диапазоне 0..10 равна: ")
+    println(sum_even)
+
+    // 2. Цикл `while` с условием продолжения
+    var countdown: i64 = 5
+    print("Обратный отсчёт while: ")
+    while countdown > 0 {
+        print(countdown)
+        print(" ")
+        countdown -= 1
+    }
+    println("Старт!")
+
+    // 3. Бесконечный цикл `loop` с явным выходом по `break`
+    // Найдём первое простое число больше 100
+    var candidate: i64 = 101
+    var first_prime_over_100: i64 = 0
+
+    loop {
+        if is_prime(candidate) {
+            first_prime_over_100 = candidate
+            break
+        }
+        candidate += 1
+    }
+
+    print("Первое простое число больше 100: ")
+    println(first_prime_over_100)
+
+    // 4. Итерация по элементам массива
+    let latencies_us = [12, 18, 9, 25, 14, 11]
+    var max_latency: i64 = latencies_us[0]
+    for idx in 0..latencies_us.len() {
+        let current = latencies_us[idx]
+        if current > max_latency {
+            max_latency = current
+        }
+    }
+    print("Максимальная задержка из массива (мкс): ")
+    println(max_latency)
+}

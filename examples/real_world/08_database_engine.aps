@@ -1,0 +1,246 @@
+// ============================================================================
+// Файл: examples/real_world/08_database_engine.aps
+// Описание: Реляционный движок базы данных (In-Memory / Disk Table Engine)
+// с первичным индексом, транзакциями ACID (Begin / Commit / Rollback через
+// журнал отката Undo Log), фильтрацией и аналитическими агрегациями.
+// ============================================================================
+
+module database_engine
+
+import std.io
+
+// Строка таблицы счетов водителей в БД
+struct DriverAccountRow {
+    row_id: i64
+    driver_name: String
+    city: String
+    balance: i64
+    completed_rides: i64
+    rating_bps: i64 // Рейтинг в базисных пунктах (495 = 4.95)
+    is_active: bool
+}
+
+// Запись журнала отката транзакции (Undo Log) для поддержки ACID Rollback
+struct UndoSnapshot {
+    tx_id: i64
+    saved_balance_from: i64
+    saved_balance_to: i64
+    is_active_tx: bool
+}
+
+// Статистика работы табличного движка БД
+struct DbEngineStats {
+    total_commits: i64
+    total_rollbacks: i64
+    index_lookups: i64
+    rows_scanned: i64
+}
+
+// Результат аналитического SELECT-запроса с фильтрацией и группировкой
+struct QueryAggregation {
+    matching_rows: i64
+    sum_balance: i64
+    total_rides: i64
+    max_balance: i64
+}
+
+// Индексный поиск строки по первичному ключу (`Option<i64>`)
+fn primary_key_lookup(
+    table: read [DriverAccountRow],
+    stats: write DbEngineStats,
+    target_id: i64
+) -> Option<i64> {
+    stats.index_lookups += 1
+    var found: Option<i64> = None
+    for i in 0..table.len() {
+        if table[i].row_id == target_id {
+            found = Some(i)
+        }
+    }
+    return found
+}
+
+// Транзакционный перевод средств между двумя строками с поддержкой ACID Commit/Rollback
+// Демонстрирует безопасную передачу двух изменяемых строк и статистики (`write`)
+fn execute_acid_transfer(
+    from_row: write DriverAccountRow,
+    to_row: write DriverAccountRow,
+    stats: write DbEngineStats,
+    tx_id: i64,
+    amount: i64,
+    force_abort: bool
+) -> Result<i64, String> {
+    // 1. Формируем снимок состояния перед началом модификаций (Undo Log)
+    let undo = UndoSnapshot {
+        tx_id: tx_id,
+        saved_balance_from: from_row.balance,
+        saved_balance_to: to_row.balance,
+        is_active_tx: true
+    }
+
+    var tx_res: Result<i64, String> = Err("Ошибка транзакции")
+
+    if !from_row.is_active || !to_row.is_active {
+        stats.total_rollbacks += 1
+        tx_res = Err("Транзакция отклонена: один из счетов заблокирован")
+    } else if amount <= 0 {
+        stats.total_rollbacks += 1
+        tx_res = Err("Транзакция отклонена: сумма должна быть положительной")
+    } else if from_row.balance < amount {
+        stats.total_rollbacks += 1
+        tx_res = Err("Транзакция отклонена: недостаточно средств на счёте")
+    } else {
+        // 2. Применяем изменения в рамках открытой транзакции
+        from_row.balance -= amount
+        to_row.balance += amount
+
+        // 3. Проверяем условие принудительного отката
+        if force_abort {
+            // ROLLBACK: восстанавливаем исходные значения из UndoSnapshot!
+            from_row.balance = undo.saved_balance_from
+            to_row.balance = undo.saved_balance_to
+            stats.total_rollbacks += 1
+            tx_res = Err("ACID Rollback: сработало ограничение безопасности, состояние восстановлено")
+        } else {
+            // 4. COMMIT: фиксируем транзакцию
+            stats.total_commits += 1
+            tx_res = Ok(from_row.balance)
+        }
+    }
+
+    return tx_res
+}
+
+// Выполнение аналитического запроса:
+// SELECT COUNT(*), SUM(balance), SUM(completed_rides), MAX(balance)
+// FROM driver_accounts WHERE city = target_city AND rating_bps >= min_rating
+fn run_analytical_query(
+    table: read [DriverAccountRow],
+    stats: write DbEngineStats,
+    target_city: read String,
+    min_rating_bps: i64
+) -> QueryAggregation {
+    var agg = QueryAggregation {
+        matching_rows: 0,
+        sum_balance: 0,
+        total_rides: 0,
+        max_balance: 0
+    }
+
+    // Временные вычисления плана запроса выполняются в регионе `query_arena`
+    region query_arena {
+        for i in 0..table.len() {
+            stats.rows_scanned += 1
+            let row = table[i]
+            if row.is_active && row.city == target_city && row.rating_bps >= min_rating_bps {
+                agg.matching_rows += 1
+                agg.sum_balance += row.balance
+                agg.total_rides += row.completed_rides
+                if row.balance > agg.max_balance {
+                    agg.max_balance = row.balance
+                }
+            }
+        }
+    }
+
+    return agg
+}
+
+fn print_account_row(row: read DriverAccountRow) {
+    print("  [Row #")
+    print(row.row_id)
+    print("] ")
+    print(row.driver_name)
+    print(" (")
+    print(row.city)
+    print(") | Баланс: ")
+    print(row.balance)
+    print(" | Поездок: ")
+    print(row.completed_rides)
+    print(" | Рейтинг: ")
+    println(row.rating_bps)
+}
+
+fn main() {
+    println("=== APS Real-World #08: Движок базы данных с ACID-транзакциями ===")
+
+    var stats = DbEngineStats {
+        total_commits: 0,
+        total_rollbacks: 0,
+        index_lookups: 0,
+        rows_scanned: 0
+    }
+
+    var row1 = DriverAccountRow { row_id: 1, driver_name: "Alibek",  city: "Almaty", balance: 15000, completed_rides: 42, rating_bps: 495, is_active: true }
+    var row2 = DriverAccountRow { row_id: 2, driver_name: "Timur",   city: "Almaty", balance: 8500,  completed_rides: 28, rating_bps: 488, is_active: true }
+    let row3 = DriverAccountRow { row_id: 3, driver_name: "Nurlan",  city: "Astana", balance: 21000, completed_rides: 65, rating_bps: 498, is_active: true }
+    let row4 = DriverAccountRow { row_id: 4, driver_name: "Daniyar", city: "Almaty", balance: 19200, completed_rides: 51, rating_bps: 492, is_active: true }
+
+    println("--- Состояние счетов до транзакций ---")
+    print_account_row(read row1)
+    print_account_row(read row2)
+
+    // 1. Успешная ACID-транзакция (COMMIT): перевод 3500 от Alibek к Timur
+    match execute_acid_transfer(write row1, write row2, write stats, 501, 3500, false) {
+        Ok(rem) => {
+            print("[TX #501 COMMIT] Перевод 3500 выполнен. Новый баланс Alibek: ")
+            println(rem)
+        }
+        Err(_) => println("[TX #501] Ошибка")
+    }
+
+    // 2. Транзакция с принудительным откатом (ROLLBACK): состояние не должно измениться!
+    match execute_acid_transfer(write row1, write row2, write stats, 502, 5000, true) {
+        Ok(rem) => println(rem),
+        Err(_) => {
+            println("[TX #502 ROLLBACK] Откат выполнен успешно! Балансы сохранены.")
+        }
+    }
+
+    // 3. Транзакция с превышением доступного остатка (ROLLBACK)
+    match execute_acid_transfer(write row1, write row2, write stats, 503, 999999, false) {
+        Ok(rem) => println(rem),
+        Err(_) => {
+            println("[TX #503 ROLLBACK] Отклонено из-за нехватки средств.")
+        }
+    }
+
+    println("--- Состояние счетов после серии транзакций ---")
+    print_account_row(read row1)
+    print_account_row(read row2)
+
+    // Формируем актуальный срез таблицы для индексного поиска и аналитики
+    let table_snapshot = [row1, row2, row3, row4]
+
+    match primary_key_lookup(read table_snapshot, write stats, 3) {
+        Some(pos) => {
+            print("[PK Index] Строка с ID=3 найдена в позиции слота: ")
+            println(pos)
+        }
+        None => println("[PK Index] Запись не найдена")
+    }
+
+    // Аналитический запрос по городу "Almaty" с рейтингом >= 4.90 (490 б.п.)
+    let city_filter = "Almaty"
+    let almaty_agg = run_analytical_query(read table_snapshot, write stats, read city_filter, 490)
+
+    println("--- Аналитический запрос (Almaty, рейтинг >= 490) ---")
+    print("  Найдено водителей       : ")
+    println(almaty_agg.matching_rows)
+    print("  Суммарный баланс (KZT)  : ")
+    println(almaty_agg.sum_balance)
+    print("  Суммарно поездок        : ")
+    println(almaty_agg.total_rides)
+    print("  Максимальный баланс     : ")
+    println(almaty_agg.max_balance)
+
+    println("--- Телеметрия СУБД ---")
+    print("  Зафиксировано (COMMIT)  : ")
+    println(stats.total_commits)
+    print("  Откатов (ROLLBACK)      : ")
+    println(stats.total_rollbacks)
+    print("  Индексных обращений     : ")
+    println(stats.index_lookups)
+    print("  Просканировано строк    : ")
+    println(stats.rows_scanned)
+}

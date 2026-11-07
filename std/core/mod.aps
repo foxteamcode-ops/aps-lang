@@ -1,0 +1,178 @@
+// ============================================================================
+// Модуль: std.core
+// Описание: Фундаментальные типы, контракты сравнения, инварианты,
+// работа с `Option<T>`, `Result<T, E>`, `Ordering` и `ErrorInfo`.
+// ============================================================================
+
+module std.core
+
+pub const APS_CORE_ABI_VERSION: i64 = 1
+
+/// Результат трёхзначного сравнения двух значений
+pub enum Ordering {
+    Less,
+    Equal,
+    Greater
+}
+
+/// Базовый дескриптор системной или прикладной ошибки
+pub struct ErrorInfo {
+    pub code: i64
+    pub domain: String
+    pub message: String
+}
+
+impl ErrorInfo {
+    pub fn new(code: i64, domain: String, message: String) -> ErrorInfo {
+        return ErrorInfo {
+            code: code,
+            domain: domain,
+            message: message
+        }
+    }
+
+    pub fn is_recoverable(read self) -> bool {
+        return self.code >= 100 && self.code < 500
+    }
+}
+
+/// Обобщённая пара двух значений
+pub struct Pair<A, B> {
+    pub first: A
+    pub second: B
+}
+
+/// Диапазон целых индексов `[start, end)`
+pub struct IndexRange {
+    pub start: i64
+    pub end: i64
+}
+
+impl IndexRange {
+    pub fn new(start: i64, end: i64) -> IndexRange {
+        return IndexRange {
+            start: start,
+            end: end
+        }
+    }
+
+    pub fn len(read self) -> i64 {
+        if self.end <= self.start {
+            return 0
+        }
+        return self.end - self.start
+    }
+
+    pub fn is_empty(read self) -> bool {
+        return self.end <= self.start
+    }
+
+    pub fn contains(read self, index: i64) -> bool {
+        return index >= self.start && index < self.end
+    }
+}
+
+/// Сравнение двух 64-битных целых чисел с возвратом `Ordering`
+pub fn cmp_i64(a: i64, b: i64) -> Ordering {
+    if a < b {
+        return Ordering::Less
+    }
+    if a > b {
+        return Ordering::Greater
+    }
+    return Ordering::Equal
+}
+
+/// Извлечение значения из `Option<i64>` со значением по умолчанию
+pub fn option_unwrap_or_i64(opt: Option<i64>, fallback: i64) -> i64 {
+    match opt {
+        Some(v) => {
+            return v
+        }
+        None => {
+            return fallback
+        }
+    }
+    return fallback
+}
+
+/// Преобразование `Option<i64>` в `Result<i64, String>`
+pub fn option_ok_or_i64(opt: Option<i64>, err_msg: String) -> Result<i64, String> {
+    match opt {
+        Some(v) => {
+            return Ok(v)
+        }
+        None => {
+            return Err(err_msg)
+        }
+    }
+    return Err(err_msg)
+}
+
+/// Проверка, является ли `Result<i64, String>` успешным
+pub fn result_is_ok_i64(res: Result<i64, String>) -> bool {
+    match res {
+        Ok(_) => {
+            return true
+        }
+        Err(_) => {
+            return false
+        }
+    }
+    return false
+}
+
+/// Извлечение значения из `Result<i64, String>` или возврат `fallback`
+pub fn result_unwrap_or_i64(res: Result<i64, String>, fallback: i64) -> i64 {
+    match res {
+        Ok(v) => {
+            return v
+        }
+        Err(_) => {
+            return fallback
+        }
+    }
+    return fallback
+}
+
+/// Проверка инварианта в рантайме с возвратом `Result`
+pub fn ensure_invariant(cond: bool, err_msg: String) -> Result<bool, String> {
+    if cond {
+        return Ok(true)
+    }
+    return Err(err_msg)
+}
+
+/// Обмен значений двух изменяемых целочисленных ячеек
+pub fn swap_i64(a: write i64, b: write i64) {
+    let tmp = a
+    a = b
+    b = tmp
+}
+
+/// Самопроверка модуля `std.core`
+pub fn self_test() -> bool {
+    let r = IndexRange.new(10, 25)
+    assert_eq(r.len(), 15)
+    assert(r.contains(10))
+    assert(!r.contains(25))
+
+    let some_val = Some(42)
+    let none_val: Option<i64> = None
+    assert_eq(option_unwrap_or_i64(some_val, 0), 42)
+    assert_eq(option_unwrap_or_i64(none_val, 99), 99)
+
+    let ok_res = option_ok_or_i64(Some(77), "missing")
+    assert_eq(result_unwrap_or_i64(ok_res, 0), 77)
+
+    let err_info = ErrorInfo.new(404, "core", "resource not found")
+    assert(err_info.is_recoverable())
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.core] self_test passed")
+}

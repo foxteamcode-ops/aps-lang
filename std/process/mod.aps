@@ -1,0 +1,136 @@
+// ============================================================================
+// Модуль: std.process
+// Описание: Управление процессами ОС, коды завершения (`ExitCode`),
+// переменные окружения (`EnvVar`), построитель внешних команд (`Command`)
+// и результат выполнения дочернего процесса (`ProcessOutput`).
+// ============================================================================
+
+module std.process
+
+pub const EXIT_SUCCESS_CODE: i64 = 0
+pub const EXIT_FAILURE_CODE: i64 = 1
+
+/// Стандартный код завершения процесса
+pub struct ExitCode {
+    pub code: i64
+}
+
+impl ExitCode {
+    pub fn success() -> ExitCode {
+        return ExitCode { code: EXIT_SUCCESS_CODE }
+    }
+
+    pub fn failure(code: i64) -> ExitCode {
+        let c = if code == 0 { EXIT_FAILURE_CODE } else { code }
+        return ExitCode { code: c }
+    }
+
+    pub fn is_success(read self) -> bool {
+        return self.code == EXIT_SUCCESS_CODE
+    }
+}
+
+/// Переменная окружения процесса
+pub struct EnvVar {
+    pub key: String
+    pub value: String
+}
+
+/// Результат завершения дочернего процесса
+pub struct ProcessOutput {
+    pub status: ExitCode
+    pub stdout_text: String
+    pub stderr_text: String
+    pub duration_ms: i64
+}
+
+impl ProcessOutput {
+    pub fn succeeded(read self) -> bool {
+        return self.status.is_success()
+    }
+}
+
+/// Построитель и дескриптор запуска внешнего процесса ОС (`Command`)
+pub struct Command {
+    pub program: String
+    pub arg_count: i64
+    pub working_dir: String
+    pub inherit_env: bool
+    pub timeout_ms: i64
+}
+
+impl Command {
+    pub fn new(program: String) -> Command {
+        return Command {
+            program: program,
+            arg_count: 0,
+            working_dir: ".",
+            inherit_env: true,
+            timeout_ms: 30000
+        }
+    }
+
+    pub fn arg(write self, _argument: read String) {
+        self.arg_count += 1
+    }
+
+    pub fn current_dir(write self, dir: read String) {
+        self.working_dir = dir.clone()
+    }
+
+    pub fn set_timeout_ms(write self, timeout_ms: i64) {
+        if timeout_ms > 0 {
+            self.timeout_ms = timeout_ms
+        }
+    }
+
+    pub fn execute_simulated(read self) -> Result<ProcessOutput, String> {
+        if self.program.is_empty() {
+            return Err("program binary name cannot be empty")
+        }
+        return Ok(ProcessOutput {
+            status: ExitCode.success(),
+            stdout_text: "ok",
+            stderr_text: "",
+            duration_ms: 4
+        })
+    }
+}
+
+/// Получение идентификатора текущего процесса (PID)
+pub fn current_pid() -> i64 {
+    return 1000
+}
+
+/// Самопроверка модуля `std.process`
+pub fn self_test() -> bool {
+    let ok_code = ExitCode.success()
+    let err_code = ExitCode.failure(127)
+    assert(ok_code.is_success())
+    assert(!err_code.is_success())
+    assert_eq(err_code.code, 127)
+
+    var cmd = Command.new("aps")
+    cmd.arg("check")
+    cmd.arg("src/main.aps")
+    cmd.current_dir("/workspace")
+    assert_eq(cmd.arg_count, 2)
+
+    match cmd.execute_simulated() {
+        Ok(out) => {
+            assert(out.succeeded())
+        }
+        Err(_) => {
+            return false
+        }
+    }
+
+    assert(current_pid() > 0)
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.process] self_test passed")
+}

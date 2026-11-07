@@ -1,0 +1,92 @@
+// ============================================================================
+// Файл: 07_control_flow_if_match.aps
+// Описание: Условные конструкции `if / else if / else` (в том числе как выражения)
+// и исчерпывающее сопоставление с образцом `match` (Pattern Matching).
+// ============================================================================
+
+module control_flow_demo
+
+enum HttpStatus {
+    Ok(i64)
+    Redirect(String)
+    ClientError(i64, String)
+    ServerError(i64)
+}
+
+fn classify_temperature(temp_c: i64) -> String {
+    // В APS конструкция `if / else` может использоваться как выражение
+    let category = if temp_c < -20 {
+        "Экстремальный холод"
+    } else if temp_c < 0 {
+        "Мороз"
+    } else if temp_c <= 25 {
+        "Комфортная температура"
+    } else {
+        "Жара"
+    }
+    return category
+}
+
+fn describe_http_status(status: read HttpStatus) {
+    // Конструкция `match` проверяет все возможные варианты (exhaustiveness checking)
+    match status {
+        HttpStatus.Ok(code) => {
+            print("Успешный ответ HTTP, код: ")
+            println(code)
+        }
+        HttpStatus.Redirect(target_url) => {
+            print("Перенаправление на адрес: ")
+            println(target_url)
+        }
+        HttpStatus.ClientError(code, reason) => {
+            print("Ошибка клиента ")
+            print(code)
+            print(": ")
+            println(reason)
+        }
+        HttpStatus.ServerError(code) => {
+            print("Критическая ошибка сервера: ")
+            println(code)
+        }
+    }
+}
+
+fn describe_number(n: i64) {
+    match n {
+        0 => println("Число равно нулю"),
+        1 | 2 | 3 => println("Малое положительное число (1..3)"),
+        10..100 => println("Двузначное число в диапазоне [10..100)"),
+        _ => {
+            print("Другое число: ")
+            println(n)
+        }
+    }
+}
+
+fn main() {
+    println("=== Управляющие конструкции if/else и match в APS ===")
+
+    let current_temp: i64 = -5
+    let weather_desc = classify_temperature(current_temp)
+    print("Температура ")
+    print(current_temp)
+    print(" C -> ")
+    println(weather_desc)
+
+    // Проверка сопоставления с образцом по числам
+    describe_number(0)
+    describe_number(2)
+    describe_number(42)
+    describe_number(500)
+
+    // Проверка сопоставления с образцом по алгебраическому типу HttpStatus
+    let s1 = HttpStatus.Ok(200)
+    let s2 = HttpStatus.Redirect("https://aps-lang.org/docs")
+    let s3 = HttpStatus.ClientError(404, "Ресурс не найден")
+    let s4 = HttpStatus.ServerError(503)
+
+    describe_http_status(read s1)
+    describe_http_status(read s2)
+    describe_http_status(read s3)
+    describe_http_status(read s4)
+}

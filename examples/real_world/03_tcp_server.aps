@@ -1,0 +1,211 @@
+// ============================================================================
+// Файл: examples/real_world/03_tcp_server.aps
+// Описание: Сетевой TCP-сервер бинарного протокола обмена пакетами телеметрии
+// с проверкой контрольных сумм FNV-1a / CRC, пулом буферов приёма-передачи
+// и детерминированным освобождением ресурсов через `defer` и `region`.
+// ============================================================================
+
+module tcp_server
+
+import std.net
+import std.io
+
+const PROTOCOL_MAGIC: i64 = 0x41505331 // "APS1"
+const FNV_PRIME: i64 = 16777619
+const FNV_OFFSET: i64 = 2166136261
+
+// Заголовок и полезная нагрузка бинарного TCP-кадра
+struct BinaryFrame {
+    magic: i64
+    sequence_num: i64
+    op_code: i64 // 1 = PING, 2 = TELEMETRY_PUSH, 3 = COMMAND_EXEC
+    payload_a: i64
+    payload_b: i64
+    checksum: i64
+}
+
+// Состояние пула сетевых буферов
+struct BufferPool {
+    pool_name: String
+    total_slots: i64
+    active_leases: i64
+    peak_leases: i64
+    frames_verified: i64
+    frames_corrupted: i64
+}
+
+// Сессия подключённого TCP-клиента
+struct ClientSession {
+    session_id: i64
+    remote_addr: String
+    is_connected: bool
+    bytes_received: i64
+    bytes_transmitted: i64
+}
+
+// Вычисление детерминированной контрольной суммы кадра (FNV-подобный микс)
+fn compute_frame_checksum(seq: i64, op: i64, pa: i64, pb: i64) -> i64 {
+    var hash = FNV_OFFSET
+    hash = (hash ^ seq) * FNV_PRIME
+    hash = (hash ^ op) * FNV_PRIME
+    hash = (hash ^ pa) * FNV_PRIME
+    hash = (hash ^ pb) * FNV_PRIME
+    return abs(hash % 1000000007)
+}
+
+// Создание корректно подписанного бинарного кадра
+fn create_signed_frame(seq: i64, op: i64, pa: i64, pb: i64) -> BinaryFrame {
+    let crc = compute_frame_checksum(seq, op, pa, pb)
+    return BinaryFrame {
+        magic: PROTOCOL_MAGIC,
+        sequence_num: seq,
+        op_code: op,
+        payload_a: pa,
+        payload_b: pb,
+        checksum: crc
+    }
+}
+
+// Выделение слота в пуле буферов (`write BufferPool`)
+fn acquire_buffer_slot(pool: write BufferPool) -> Result<i64, String> {
+    var res: Result<i64, String> = Err("Пул буферов исчерпан (BufferPool Exhausted)")
+    if pool.active_leases < pool.total_slots {
+        pool.active_leases += 1
+        if pool.active_leases > pool.peak_leases {
+            pool.peak_leases = pool.active_leases
+        }
+        res = Ok(pool.active_leases)
+    }
+    return res
+}
+
+// Возврат слота в пул буферов (`write BufferPool`)
+fn release_buffer_slot(pool: write BufferPool) {
+    if pool.active_leases > 0 {
+        pool.active_leases -= 1
+    }
+}
+
+// Валидация заголовка и контрольной суммы бинарного пакета
+fn verify_binary_frame(frame: read BinaryFrame) -> Result<i64, String> {
+    var res: Result<i64, String> = Ok(frame.payload_a + frame.payload_b)
+    let expected_crc = compute_frame_checksum(
+        frame.sequence_num,
+        frame.op_code,
+        frame.payload_a,
+        frame.payload_b
+    )
+    if frame.magic != PROTOCOL_MAGIC {
+        res = Err("Некорректная сигнатура пакета (Bad Magic)")
+    } else if frame.checksum != expected_crc {
+        res = Err("Ошибка контрольной суммы CRC/FNV (Checksum Mismatch)")
+    }
+    return res
+}
+
+// Обработка одного бинарного пакета в рамках клиентской сессии
+fn process_tcp_packet(
+    session: write ClientSession,
+    pool: write BufferPool,
+    frame: read BinaryFrame
+) -> Result<i64, String> {
+    let _slot_id = acquire_buffer_slot(write pool)?
+
+    // Гарантированный возврат буфера в пул при любом исходе обработки пакета
+    defer {
+        release_buffer_slot(write pool)
+    }
+
+    session.bytes_received += 48
+
+    var pkt_res: Result<i64, String> = Err("Corrupted frame")
+    match verify_binary_frame(read frame) {
+        Ok(payload_sum) => {
+            pool.frames_verified += 1
+            session.bytes_transmitted += 24
+            pkt_res = Ok(payload_sum)
+        }
+        Err(_) => {
+            pool.frames_corrupted += 1
+        }
+    }
+    return pkt_res
+}
+
+fn close_client_session(session: write ClientSession) {
+    session.is_connected = false
+    print("  [defer] TCP-сессия #")
+    print(session.session_id)
+    print(" (")
+    print(session.remote_addr)
+    println(") закрыта детерминированно.")
+}
+
+fn main() {
+    println("=== APS Real-World #03: TCP-сервер бинарного протокола с CRC/FNV ===")
+
+    var pool = BufferPool {
+        pool_name: "ZeroCopy-RxTx-Pool",
+        total_slots: 64,
+        active_leases: 0,
+        peak_leases: 0,
+        frames_verified: 0,
+        frames_corrupted: 0
+    }
+
+    var client = ClientSession {
+        session_id: 701,
+        remote_addr: "10.24.0.15:54321",
+        is_connected: true,
+        bytes_received: 0,
+        bytes_transmitted: 0
+    }
+
+    defer {
+        close_client_session(write client)
+    }
+
+    // Создаём поток входящих кадров (3 валидных и 1 повреждённый при передаче)
+    let f1 = create_signed_frame(1, 1, 100, 200)
+    let f2 = create_signed_frame(2, 2, 1500, 3200)
+    let f3 = create_signed_frame(3, 3, 840, 160)
+    var f4_corrupted = create_signed_frame(4, 2, 500, 500)
+    f4_corrupted.checksum = 99999999 // Имитация битовой ошибки в канале связи
+
+    let frames = [f1, f2, f3, f4_corrupted]
+
+    region packet_arena {
+        for i in 0..frames.len() {
+            let pkt = frames[i]
+            match process_tcp_packet(write client, write pool, read pkt) {
+                Ok(ack_val) => {
+                    print("  [TCP кадр #")
+                    print(pkt.sequence_num)
+                    print("] CRC OK (")
+                    print(pkt.checksum)
+                    print(") -> агрегат нагрузки: ")
+                    println(ack_val)
+                }
+                Err(_) => {
+                    print("  [TCP кадр #")
+                    print(pkt.sequence_num)
+                    println("] ОТКЛОНЁН: несовпадение контрольной суммы CRC/FNV!")
+                }
+            }
+        }
+    }
+
+    println("--- Итоги работы бинарного TCP-сервера ---")
+    print("  Верифицировано пакетов : ")
+    println(pool.frames_verified)
+    print("  Повреждённых пакетов   : ")
+    println(pool.frames_corrupted)
+    print("  Пик занятых буферов    : ")
+    println(pool.peak_leases)
+    print("  Активных буферов сейчас: ")
+    println(pool.active_leases)
+    print("  Принято байт           : ")
+    println(client.bytes_received)
+    print("  Отправлено байт (ACK)  : ")
+    println(client.bytes_transmitted)
+}

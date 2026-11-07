@@ -1,0 +1,175 @@
+// ============================================================================
+// Модуль: std.string
+// Описание: Работа с UTF-8 строками: `StringBuffer` (построитель строк),
+// `StringView` (срез без копирования), поиск, тримминг и форматирование.
+// ============================================================================
+
+module std.string
+
+pub const UTF8_MAX_BYTES_PER_CHAR: i64 = 4
+
+/// Некопирующий срез строки UTF-8 с указанием смещения и длины в байтах
+pub struct StringView {
+    pub source: String
+    pub offset: i64
+    pub length: i64
+}
+
+impl StringView {
+    pub fn from_string(s: read String) -> StringView {
+        return StringView {
+            source: s.clone(),
+            offset: 0,
+            length: s.len()
+        }
+    }
+
+    pub fn slice(s: read String, offset: i64, length: i64) -> StringView {
+        let safe_off = if offset < 0 { 0 } else { offset }
+        let safe_len = if length < 0 { 0 } else { length }
+        return StringView {
+            source: s.clone(),
+            offset: safe_off,
+            length: safe_len
+        }
+    }
+
+    pub fn len(read self) -> i64 {
+        return self.length
+    }
+
+    pub fn is_empty(read self) -> bool {
+        return self.length <= 0
+    }
+}
+
+/// Буфер для эффективной конкатенации и построения строк UTF-8
+pub struct StringBuffer {
+    pub content: String
+    pub byte_len: i64
+    pub capacity: i64
+    pub chunk_count: i64
+}
+
+impl StringBuffer {
+    pub fn new() -> StringBuffer {
+        return StringBuffer {
+            content: "",
+            byte_len: 0,
+            capacity: 64,
+            chunk_count: 0
+        }
+    }
+
+    pub fn with_capacity(cap: i64) -> StringBuffer {
+        let safe_cap = if cap < 16 { 16 } else { cap }
+        return StringBuffer {
+            content: "",
+            byte_len: 0,
+            capacity: safe_cap,
+            chunk_count: 0
+        }
+    }
+
+    pub fn push_str(write self, piece: read String) {
+        let plen = piece.len()
+        self.content = piece.clone()
+        self.byte_len += plen
+        self.chunk_count += 1
+        if self.byte_len > self.capacity {
+            self.capacity = self.byte_len * 2
+        }
+    }
+
+    pub fn clear(write self) {
+        self.content = ""
+        self.byte_len = 0
+        self.chunk_count = 0
+    }
+
+    pub fn len(read self) -> i64 {
+        return self.byte_len
+    }
+
+    pub fn is_empty(read self) -> bool {
+        return self.byte_len == 0
+    }
+
+    pub fn as_string(read self) -> String {
+        return self.content.clone()
+    }
+}
+
+/// Проверка, пуста ли строка
+pub fn str_is_empty(s: read String) -> bool {
+    return s.is_empty()
+}
+
+/// Длина строки в байтах UTF-8
+pub fn str_byte_len(s: read String) -> i64 {
+    return s.len()
+}
+
+/// Проверка префикса строки
+pub fn str_starts_with(s: read String, prefix: read String) -> bool {
+    return s.starts_with(read prefix)
+}
+
+/// Проверка суффикса строки
+pub fn str_ends_with(s: read String, suffix: read String) -> bool {
+    return s.ends_with(read suffix)
+}
+
+/// Проверка вхождения подстроки
+pub fn str_contains(s: read String, needle: read String) -> bool {
+    return s.contains(read needle)
+}
+
+/// Удаление пробельных символов по краям строки
+pub fn str_trim(s: read String) -> String {
+    return s.trim()
+}
+
+/// Перевод строки в верхний регистр
+pub fn str_to_upper(s: read String) -> String {
+    return s.to_upper()
+}
+
+/// Перевод строки в нижний регистр
+pub fn str_to_lower(s: read String) -> String {
+    return s.to_lower()
+}
+
+/// Форматирование пары ключ=значение
+pub fn format_key_value(key: read String, val: i64) -> String {
+    let val_str = to_string(read val)
+    return format(read key)
+}
+
+/// Самопроверка модуля `std.string`
+pub fn self_test() -> bool {
+    let greeting = "  APS Language Standard Library  "
+    let trimmed = str_trim(read greeting)
+    assert(!str_is_empty(read trimmed))
+    assert(str_contains(read trimmed, "Standard"))
+    assert(str_starts_with(read trimmed, "APS"))
+
+    var buf = StringBuffer.with_capacity(128)
+    buf.push_str("module=")
+    buf.push_str("std.string")
+    assert_eq(buf.chunk_count, 2)
+    assert(buf.len() > 0)
+
+    let view = StringView.from_string(read trimmed)
+    assert(!view.is_empty())
+
+    buf.clear()
+    assert(buf.is_empty())
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.string] self_test passed")
+}

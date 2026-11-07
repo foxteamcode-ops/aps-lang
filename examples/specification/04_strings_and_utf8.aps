@@ -1,0 +1,64 @@
+// ============================================================================
+// Файл: 04_strings_and_utf8.aps
+// Описание: Строковый тип `String` с гарантированной кодировкой UTF-8,
+// строковые срезы `str`, конкатенация, измерение длины в байтах и символах,
+// а также безопасная передача строк через `read String`.
+// ============================================================================
+
+module strings_demo
+
+// Функция принимает строку по праву чтения (`read String`) без копирования буфера
+fn analyze_text(text: read String) {
+    print("Текст: \"")
+    print(text)
+    println("\"")
+
+    let byte_len = text.byte_len()
+    let char_count = text.char_count()
+
+    print("  Длина в байтах UTF-8: ")
+    print(byte_len)
+    print(", количество символов Unicode: ")
+    println(char_count)
+}
+
+// Формирование приветствия с конкатенацией
+fn build_welcome_banner(user: read String, role: read String) -> String {
+    var banner: String = "[APS] Пользователь: "
+    banner = banner + user
+    banner = banner + " | Роль: "
+    banner = banner + role
+    return banner
+}
+
+fn main() {
+    println("=== Работа со строками UTF-8 в APS ===")
+
+    // Строки в APS хранятся в валидной кодировке UTF-8
+    let ascii_title: String = "Advanced Performance Systems"
+    let cyrillic_title: String = "Высокопроизводительные системы APS"
+    let multilingual: String = "Alibek / Алибек / Әлібек"
+
+    analyze_text(read ascii_title)
+    analyze_text(read cyrillic_title)
+    analyze_text(read multilingual)
+
+    // Создание нового сообщения из нескольких строк
+    let user_name = "Alibek"
+    let user_role = "Lead Systems Architect"
+    let banner = build_welcome_banner(read user_name, read user_role)
+    println(banner)
+
+    // Работа с подстроками (срезами по границам символов UTF-8)
+    let prefix = ascii_title.slice_bytes(0, 8)
+    print("Префикс строки (0..8): ")
+    println(prefix)
+
+    // Проверка префикса и суффикса
+    if ascii_title.starts_with("Advanced") {
+        println("Строка начинается с 'Advanced'")
+    }
+    if ascii_title.ends_with("Systems") {
+        println("Строка заканчивается на 'Systems'")
+    }
+}

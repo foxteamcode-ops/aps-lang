@@ -1,0 +1,73 @@
+// ============================================================================
+// Файл: 19_ama_region_memory_arena.aps
+// Описание: Уровень 3 архитектуры памяти AMA (Region Memory / Arena Tier).
+// Конструкция `region arena { ... }` создаёт линейную арену памяти со сверхбыстрым
+// выделением O(1) (bump-pointer allocation) и мгновенным групповым освобождением
+// всех узлов при выходе из блока без индивидуальных вызовов `free`.
+// ============================================================================
+
+module ama_region_demo
+
+struct RouteNode {
+    station_id: i64
+    name: String
+    distance_from_prev_km: i64
+}
+
+struct RouteSummary {
+    node_count: i64
+    total_distance_km: i64
+}
+
+// Вычисление агрегированной сводки по узлам, размещённым в регионе.
+// Сам результат `RouteSummary` содержит только копируемые числа (`i64`),
+// поэтому он может безопасно покинуть блок `region`.
+fn summarize_route(nodes: read [RouteNode]) -> RouteSummary {
+    var total_km: i64 = 0
+    for i in 0..nodes.len() {
+        total_km += nodes[i].distance_from_prev_km
+    }
+    return RouteSummary {
+        node_count: nodes.len(),
+        total_distance_km: total_km
+    }
+}
+
+fn main() {
+    println("=== AMA Уровень 3: Регионы памяти (region arena) ===")
+
+    var final_summary = RouteSummary {
+        node_count: 0,
+        total_distance_km: 0
+    }
+
+    // Создаём лексический регион памяти `arena`.
+    // Все динамические структуры и временные буферы внутри этого блока
+    // выделяются единым непрерывным блоком памяти.
+    region arena {
+        println("  [region arena] Арена инициализирована.")
+
+        let route_nodes = [
+            RouteNode { station_id: 1, name: "Алматы-1", distance_from_prev_km: 0 },
+            RouteNode { station_id: 2, name: "Отар", distance_from_prev_km: 165 },
+            RouteNode { station_id: 3, name: "Шу", distance_from_prev_km: 140 },
+            RouteNode { station_id: 4, name: "Сарышаган", distance_from_prev_km: 280 },
+            RouteNode { station_id: 5, name: "Караганда", distance_from_prev_km: 390 },
+            RouteNode { station_id: 6, name: "Астана", distance_from_prev_km: 215 }
+        ]
+
+        // Обрабатываем граф/список маршрута внутри арены
+        final_summary = summarize_route(read route_nodes)
+
+        print("  [region arena] Обработано станций: ")
+        println(final_summary.node_count)
+
+        // Попытка вернуть ссылку на внутренний объект региона наружу
+        // блокируется компилятором с ошибкой E0305 (Region Escape Violation).
+    }
+    // <-- Здесь вся память региона `arena` освобождена мгновенно за одну операцию O(1)!
+
+    println("[main] Выход из региона выполнен, арена полностью очищена.")
+    print("Итоговая протяжённость маршрута (км): ")
+    println(final_summary.total_distance_km)
+}

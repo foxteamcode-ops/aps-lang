@@ -1,0 +1,62 @@
+// ============================================================================
+// Файл: 25_async_await_tasks.aps
+// Описание: Асинхронное программирование (`async fn`, `await`) и структурированная
+// конкурентность (`spawn`) с проверкой безопасности памяти AMA на границах задач.
+// ============================================================================
+
+module async_tasks_demo
+
+import std.async
+
+struct TelemetryPacket {
+    node_id: i64
+    cpu_load_pct: i64
+    mem_used_mb: i64
+}
+
+// Асинхронная функция опроса удалённого узла
+async fn fetch_node_telemetry(node_id: i64, base_load: i64) -> TelemetryPacket {
+    // Имитация неблокирующего ожидания сетевого ввода-вывода
+    await async_sleep_ms(10)
+
+    return TelemetryPacket {
+        node_id: node_id,
+        cpu_load_pct: base_load + (node_id * 5),
+        mem_used_mb: 1024 + (node_id * 256)
+    }
+}
+
+// Асинхронный координатор, запускающий несколько параллельных задач через `spawn`
+async fn collect_cluster_metrics() -> i64 {
+    println("Запуск параллельного сбора телеметрии с 3 узлов...")
+
+    // `spawn` создаёт легковесную асинхронную задачу (TaskHandle<TelemetryPacket>)
+    let task1 = spawn fetch_node_telemetry(1, 20)
+    let task2 = spawn fetch_node_telemetry(2, 35)
+    let task3 = spawn fetch_node_telemetry(3, 50)
+
+    // Ожидаем завершения всех трёх задач (`await`)
+    let pkt1 = await task1
+    let pkt2 = await task2
+    let pkt3 = await task3
+
+    print("  Узел #1 CPU(%): ")
+    println(pkt1.cpu_load_pct)
+    print("  Узел #2 CPU(%): ")
+    println(pkt2.cpu_load_pct)
+    print("  Узел #3 CPU(%): ")
+    println(pkt3.cpu_load_pct)
+
+    let total_mem = pkt1.mem_used_mb + pkt2.mem_used_mb + pkt3.mem_used_mb
+    return total_mem
+}
+
+fn main() {
+    println("=== Асинхронные функции (async/await) и задачи (spawn) в APS ===")
+
+    // Выполнение корневой асинхронной корутины на пуле воркеров рантайма APS
+    let total_cluster_mem = block_on(collect_cluster_metrics())
+
+    print("Суммарное потребление памяти кластера (МБ): ")
+    println(total_cluster_mem)
+}

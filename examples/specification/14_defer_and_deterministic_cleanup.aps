@@ -1,0 +1,79 @@
+// ============================================================================
+// Файл: 14_defer_and_deterministic_cleanup.aps
+// Описание: Конструкция `defer { ... }` для гарантированного детерминированного
+// освобождения внешних ресурсов, закрытия дескрипторов и снятия блокировок
+// при выходе из лексической области видимости (в порядке LIFO).
+// ============================================================================
+
+module defer_demo
+
+struct AuditSession {
+    session_id: i64
+    is_open: bool
+}
+
+fn close_session(session: write AuditSession) {
+    session.is_open = false
+    print("  [defer] Сессия аудита #")
+    print(session.session_id)
+    println(" гарантированно закрыта.")
+}
+
+// Функция демонстрирует, что `defer` срабатывает как при обычном выходе,
+// так и при раннем возврате по ошибке.
+fn process_batch_transaction(batch_id: i64, should_fail: bool) -> Result<i64, String> {
+    var session = AuditSession {
+        session_id: batch_id,
+        is_open: true
+    }
+
+    print("Открыта сессия аудита #")
+    println(session.session_id)
+
+    // Первый зарегистрированный `defer` выполнится ПОСЛЕДНИМ при выходе (LIFO)
+    defer {
+        close_session(write session)
+    }
+
+    // Второй зарегистрированный `defer` выполнится ПЕРВЫМ при выходе
+    defer {
+        print("  [defer] Сброс буфера телеметрии для пакета #")
+        println(batch_id)
+    }
+
+    println("  Выполнение бизнес-логики пакета...")
+
+    if should_fail {
+        println("  Обнаружен сбой! Выполняем ранний выход (return Err).")
+        return Err("Сбой контрольной суммы пакета")
+    }
+
+    println("  Пакет успешно обработан.")
+    return Ok(100)
+}
+
+fn main() {
+    println("=== Детерминированная очистка ресурсов (defer) в APS ===")
+
+    println("--- Сценарий 1: Успешное завершение ---")
+    let r1 = process_batch_transaction(1, false)
+    match r1 {
+        Ok(code) => {
+            print("Результат пакета #1: Ok(")
+            print(code)
+            println(")")
+        }
+        Err(msg) => println(msg)
+    }
+
+    println("--- Сценарий 2: Досрочный выход по ошибке ---")
+    let r2 = process_batch_transaction(2, true)
+    match r2 {
+        Ok(code) => println(code),
+        Err(msg) => {
+            print("Результат пакета #2: Err(\"")
+            print(msg)
+            println("\")")
+        }
+    }
+}

@@ -1,0 +1,77 @@
+// ============================================================================
+// Файл: 28_file_io_and_streams.aps
+// Описание: Файловый ввод-вывод (`std.fs`, `std.io`), буферизованная запись
+// и чтение файлов с обработкой ошибок через `Result<T, IoError>` и гарантированным
+// закрытием дескриптора через `defer`.
+// ============================================================================
+
+module file_io_demo
+
+import std.fs
+import std.io
+
+// Запись журнала поездок в файл
+fn write_trip_log(file_path: read String) -> Result<i64, String> {
+    var file = File.create(read file_path)?
+
+    // Гарантируем сброс буферов и закрытие дескриптора ОС при выходе из функции
+    defer {
+        file.close()
+    }
+
+    let header = "ID,DRIVER,BALANCE\n"
+    let row1   = "1,Alibek,1000\n"
+    let row2   = "2,Timur,2450\n"
+
+    var bytes_written: i64 = 0
+    bytes_written += file.write_str(read header)?
+    bytes_written += file.write_str(read row1)?
+    bytes_written += file.write_str(read row2)?
+    file.flush()?
+
+    return Ok(bytes_written)
+}
+
+// Чтение содержимого файла целиком в строку UTF-8
+fn read_trip_log(file_path: read String) -> Result<String, String> {
+    var file = File.open(read file_path)?
+    defer {
+        file.close()
+    }
+
+    let content = file.read_to_string()?
+    return Ok(content)
+}
+
+fn main() {
+    println("=== Файловый ввод-вывод (File I/O) и потоки в APS ===")
+
+    let path = "drivers_report.csv"
+
+    // 1. Записываем отчёт на диск
+    match write_trip_log(read path) {
+        Ok(total_bytes) => {
+            print("Успешно записано байт в файл '")
+            print(path)
+            print("': ")
+            println(total_bytes)
+        }
+        Err(err_msg) => {
+            print("Ошибка записи файла: ")
+            println(err_msg)
+        }
+    }
+
+    // 2. Читаем записанный отчёт обратно
+    match read_trip_log(read path) {
+        Ok(content) => {
+            println("--- Содержимое прочитанного файла ---")
+            print(content)
+            println("-------------------------------------")
+        }
+        Err(err_msg) => {
+            print("Ошибка чтения файла: ")
+            println(err_msg)
+        }
+    }
+}

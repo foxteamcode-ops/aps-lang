@@ -1,0 +1,238 @@
+// ============================================================================
+// Файл: examples/real_world/02_http_server.aps
+// Описание: Высокопроизводительный HTTP/1.1 сервер с таблицей маршрутизации,
+// цепочкой middleware (аутентификация, лимитирование запросов), обработкой
+// каждого запроса в изолированном аренном регионе `region request_arena`
+// и формированием ответов 200 OK / 404 Not Found / 500 Internal Server Error.
+// ============================================================================
+
+module http_server
+
+import std.net
+import std.io
+
+// HTTP-методы
+enum HttpMethod {
+    Get
+    Post
+    Delete
+}
+
+// Входящий HTTP/1.1 запрос
+struct HttpRequest {
+    request_id: i64
+    method_code: i64 // 1 = GET, 2 = POST, 3 = DELETE
+    path: String
+    content_length: i64
+    auth_token_valid: bool
+    client_ip_hash: i64
+}
+
+// Исходящий HTTP/1.1 ответ
+struct HttpResponse {
+    status_code: i64
+    status_text: String
+    body: String
+    bytes_sent: i64
+}
+
+// Временный контекст разбора запроса, размещаемый внутри `region request_arena`
+struct ArenaRequestContext {
+    req_id: i64
+    route_matched: i64
+    allocated_scratch_bytes: i64
+}
+
+// Метрики работы HTTP-сервера
+struct ServerMetrics {
+    total_requests: i64
+    status_200_count: i64
+    status_404_count: i64
+    status_500_count: i64
+    total_bytes_out: i64
+}
+
+// Неизменяемая разделяемая конфигурация HTTP-сервера
+struct HttpServerConfig {
+    bind_host: String
+    bind_port: i64
+    max_body_bytes: i64
+    keep_alive_ms: i64
+}
+
+// Middleware: проверка корректности запроса и лимита тела (`Result<i64, String>`)
+fn run_middleware(req: read HttpRequest, cfg: read Shared<HttpServerConfig>) -> Result<i64, String> {
+    var mw_res: Result<i64, String> = Ok(req.request_id)
+    if !req.auth_token_valid {
+        mw_res = Err("Unauthorized: недействительный токен доступа")
+    } else if req.content_length < 0 || req.content_length > cfg.max_body_bytes {
+        mw_res = Err("Payload Too Large: превышен лимит тела запроса")
+    }
+    return mw_res
+}
+
+// Таблица маршрутизации HTTP-запросов (`Option<i64>`)
+// Возвращает код обработчика: 10 = /health, 20 = /api/v1/drivers, 30 = /api/v1/orders
+fn match_route(method_code: i64, path: read String) -> Option<i64> {
+    var route: Option<i64> = None
+    if method_code == 1 && path == "/health" {
+        route = Some(10)
+    } else if method_code == 1 && path == "/api/v1/drivers" {
+        route = Some(20)
+    } else if method_code == 2 && path == "/api/v1/orders" {
+        route = Some(30)
+    }
+    return route
+}
+
+// Построение HTTP-ответа по коду статуса
+fn build_http_response(status: i64, status_text: String, body: String) -> HttpResponse {
+    let body_len = body.len()
+    let header_overhead = 96
+    return HttpResponse {
+        status_code: status,
+        status_text: status_text,
+        body: body,
+        bytes_sent: body_len + header_overhead
+    }
+}
+
+// Обработка одного HTTP-запроса внутри аренного региона `region request_arena`
+fn handle_http_request(
+    req: read HttpRequest,
+    cfg: read Shared<HttpServerConfig>,
+    metrics: write ServerMetrics
+) -> HttpResponse {
+    metrics.total_requests += 1
+
+    var response_status: i64 = 500
+    var response_text = "Internal Server Error"
+    var response_body = "{\"error\":\"internal server fault\"}"
+
+    // Каждый HTTP-запрос обрабатывается в собственной арене `request_arena`.
+    // Все временные буферы и заголовки освобождаются за O(1) при выходе из блока!
+    region request_arena {
+        let mw_check = run_middleware(read req, read cfg)
+        match mw_check {
+            Ok(_) => {
+                let route_opt = match_route(req.method_code, read req.path)
+                match route_opt {
+                    Some(handler_id) => {
+                        let ctx = request_arena.alloc(ArenaRequestContext {
+                            req_id: req.request_id,
+                            route_matched: handler_id,
+                            allocated_scratch_bytes: 4096
+                        })
+
+                        if ctx.route_matched == 10 {
+                            response_status = 200
+                            response_text = "OK"
+                            response_body = "{\"status\":\"healthy\",\"engine\":\"APS-HTTP/1.1\"}"
+                        } else if ctx.route_matched == 20 {
+                            response_status = 200
+                            response_text = "OK"
+                            response_body = "{\"drivers\":[{\"id\":1,\"name\":\"Alibek\"},{\"id\":2,\"name\":\"Timur\"}]}"
+                        } else {
+                            response_status = 200
+                            response_text = "OK"
+                            response_body = "{\"order_id\":9001,\"accepted\":true}"
+                        }
+                    }
+                    None => {
+                        response_status = 404
+                        response_text = "Not Found"
+                        response_body = "{\"error\":\"route not found\"}"
+                    }
+                }
+            }
+            Err(_) => {
+                response_status = 500
+                response_text = "Internal Server Error"
+                response_body = "{\"error\":\"middleware rejected request\"}"
+            }
+        }
+    }
+
+    if response_status == 200 {
+        metrics.status_200_count += 1
+    } else if response_status == 404 {
+        metrics.status_404_count += 1
+    } else {
+        metrics.status_500_count += 1
+    }
+
+    let resp = build_http_response(response_status, response_text, response_body)
+    metrics.total_bytes_out += resp.bytes_sent
+    return resp
+}
+
+fn log_response(req: read HttpRequest, resp: read HttpResponse) {
+    print("  [HTTP #")
+    print(req.request_id)
+    print("] ")
+    print(req.path)
+    print(" -> ")
+    print(resp.status_code)
+    print(" ")
+    print(resp.status_text)
+    print(" (байт: ")
+    print(resp.bytes_sent)
+    println(")")
+}
+
+fn main() {
+    println("=== APS Real-World #02: HTTP/1.1 сервер с region request_arena ===")
+
+    let raw_cfg = HttpServerConfig {
+        bind_host: "0.0.0.0",
+        bind_port: 8080,
+        max_body_bytes: 65536,
+        keep_alive_ms: 5000
+    }
+
+    // Замораживаем конфигурацию сервера в `Shared<HttpServerConfig>`
+    let shared_cfg = share(raw_cfg)
+
+    print("HTTP-сервер запущен на ")
+    print(shared_cfg.bind_host)
+    print(":")
+    println(shared_cfg.bind_port)
+
+    defer {
+        println("[defer] Слушающий сокет HTTP-сервера корректно закрыт.")
+    }
+
+    var metrics = ServerMetrics {
+        total_requests: 0,
+        status_200_count: 0,
+        status_404_count: 0,
+        status_500_count: 0,
+        total_bytes_out: 0
+    }
+
+    let incoming_requests = [
+        HttpRequest { request_id: 1, method_code: 1, path: "/health", content_length: 0, auth_token_valid: true, client_ip_hash: 1001 },
+        HttpRequest { request_id: 2, method_code: 1, path: "/api/v1/drivers", content_length: 0, auth_token_valid: true, client_ip_hash: 1002 },
+        HttpRequest { request_id: 3, method_code: 2, path: "/api/v1/orders", content_length: 256, auth_token_valid: true, client_ip_hash: 1003 },
+        HttpRequest { request_id: 4, method_code: 1, path: "/api/v1/unknown", content_length: 0, auth_token_valid: true, client_ip_hash: 1004 },
+        HttpRequest { request_id: 5, method_code: 2, path: "/api/v1/orders", content_length: 999999, auth_token_valid: false, client_ip_hash: 1005 }
+    ]
+
+    for i in 0..incoming_requests.len() {
+        let req = incoming_requests[i]
+        let resp = handle_http_request(read req, read shared_cfg, write metrics)
+        log_response(read req, read resp)
+    }
+
+    println("--- Статистика HTTP-сервера ---")
+    print("  Обработано запросов: ")
+    println(metrics.total_requests)
+    print("  Ответов 200 OK     : ")
+    println(metrics.status_200_count)
+    print("  Ответов 404        : ")
+    println(metrics.status_404_count)
+    print("  Ответов 500        : ")
+    println(metrics.status_500_count)
+    print("  Отправлено байт    : ")
+    println(metrics.total_bytes_out)
+}

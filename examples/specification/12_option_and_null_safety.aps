@@ -1,0 +1,99 @@
+// ============================================================================
+// Файл: 12_option_and_null_safety.aps
+// Описание: Полное отсутствие `null` / `nil` в безопасном подмножестве APS.
+// Работа с типом `Option<T>` (`Some(T)` и `None`) для представления
+// опциональных значений и результатов поиска.
+// ============================================================================
+
+module option_demo
+
+struct Driver {
+    id: i64
+    name: String
+    balance: i64
+}
+
+// Поиск индекса элемента в срезе: возвращает `Option<i64>` вместо магического -1
+fn find_index(items: read [i64], target: i64) -> Option<i64> {
+    for i in 0..items.len() {
+        if items[i] == target {
+            return Some(i)
+        }
+    }
+    return None
+}
+
+// Поиск водителя по идентификатору
+fn find_driver_name(drivers: read [Driver], search_id: i64) -> Option<String> {
+    for i in 0..drivers.len() {
+        if drivers[i].id == search_id {
+            return Some(drivers[i].name)
+        }
+    }
+    return None
+}
+
+// Безопасное деление нацело с проверкой делителя на ноль
+fn checked_divide(numerator: i64, denominator: i64) -> Option<i64> {
+    if denominator == 0 {
+        return None
+    }
+    return Some(numerator / denominator)
+}
+
+fn main() {
+    println("=== Безопасность без null: тип Option<T> в APS ===")
+
+    let numbers = [10, 25, 42, 77, 99]
+
+    // 1. Поиск существующего значения
+    let found_pos = find_index(read numbers, 42)
+    match found_pos {
+        Some(idx) => {
+            print("Число 42 найдено на позиции: ")
+            println(idx)
+        }
+        None => println("Число 42 не найдено")
+    }
+
+    // 2. Поиск отсутствующего значения
+    let missing_pos = find_index(read numbers, 500)
+    match missing_pos {
+        Some(idx) => {
+            print("Число 500 найдено на позиции: ")
+            println(idx)
+        }
+        None => println("Число 500 отсутствует в массиве (получен None)")
+    }
+
+    // 3. Безопасное деление
+    let div_ok = checked_divide(100, 4)
+    let div_zero = checked_divide(100, 0)
+
+    match div_ok {
+        Some(val) => {
+            print("100 / 4 = ")
+            println(val)
+        }
+        None => println("Деление на ноль!")
+    }
+
+    match div_zero {
+        Some(val) => println(val),
+        None => println("100 / 0 перехвачено безопасно: возвращён None")
+    }
+
+    // 4. Поиск структуры в списке
+    let roster = [
+        Driver { id: 1, name: "Alibek", balance: 1000 },
+        Driver { id: 2, name: "Timur", balance: 2400 }
+    ]
+
+    match find_driver_name(read roster, 1) {
+        Some(name) => {
+            print("Найден водитель с ID=1: ")
+            println(name)
+        }
+        None => println("Водитель не найден")
+    }
+}

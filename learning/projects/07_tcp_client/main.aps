@@ -1,0 +1,1 @@
+struct TcpClient { host: String, port: i64 } fn connect(c: read TcpClient) -> bool { true } fn main() { let cl = TcpClient { host: "127.0.0.1", port: 8080 }; println(connect(read cl)) }

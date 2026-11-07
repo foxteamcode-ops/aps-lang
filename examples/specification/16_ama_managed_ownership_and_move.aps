@@ -1,0 +1,64 @@
+// ============================================================================
+// Файл: 16_ama_managed_ownership_and_move.aps
+// Описание: Уровень 2 архитектуры памяти AMA (Managed Ownership / Single-Owner Heap).
+// Каждый динамический объект имеет ровно одного владельца. Передача через `take`
+// перемещает владение (Move Semantics), а компилятор автоматически вставляет
+// детерминированное освобождение памяти (CTFP — Compile-Time Free Placement).
+// ============================================================================
+
+module ama_ownership_demo
+
+struct Driver {
+    id: i64
+    name: String
+    balance: i64
+}
+
+// Фабричная функция создаёт объект и передаёт владение вызывающей стороне
+fn create_driver(id: i64, name: String, initial_balance: i64) -> Driver {
+    let d = Driver {
+        id: id,
+        name: name,
+        balance: initial_balance
+    }
+    return d // Владение перемещается наружу из функции
+}
+
+// Функция забирает владение (`take Driver`), модифицирует и возвращает нового владельца
+fn promote_driver(driver: take Driver, bonus: i64) -> Driver {
+    var owned = driver
+    owned.balance += bonus
+    return owned
+}
+
+// Функция окончательно поглощает объект (`take Driver`).
+// В конце тела `consume_driver` компилятор автоматически вставит освобождение
+// памяти (`__aps_drop_Driver`), так как владение никуда дальше не передаётся.
+fn consume_driver(driver: take Driver) {
+    print("Архивация и закрытие профиля водителя #")
+    print(driver.id)
+    print(" (")
+    print(driver.name)
+    print("), финальный баланс: ")
+    println(driver.balance)
+    // <-- Точка автоматического освобождения памяти AMA (CTFP)
+}
+
+fn main() {
+    println("=== AMA Уровень 2: Одиночное владение и передача через take ===")
+
+    // `driver1` владеет структурой `Driver` и её динамическим буфером `name`
+    let driver1 = create_driver(1, "Alibek", 1000)
+
+    // Передаём владение из `driver1` в функцию `promote_driver` с помощью `take`.
+    // После этой строки обращение к `driver1` запрещено компилятором (ошибка E0301 Use-After-Move).
+    let driver2 = promote_driver(take driver1, 500)
+
+    print("Обновлённый баланс у нового владельца driver2: ")
+    println(driver2.balance)
+
+    // Передаём владение в `consume_driver`, где ресурс будет детерминированно освобождён
+    consume_driver(take driver2)
+
+    println("Ресурс водителя успешно поглощён и освобождён без участия сборщика мусора.")
+}

@@ -1,0 +1,1 @@
+struct LogEntry { level: String, count: i64 } fn main() { var e = LogEntry { level: "INFO", count: 42 }; println(e.count) }

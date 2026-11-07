@@ -1,0 +1,78 @@
+// ============================================================================
+// Файл: 06_functions_and_recursion.aps
+// Описание: Объявление функций (`fn`), параметры, возвращаемые значения,
+// хвостовая и классическая рекурсия (факториал, числа Фибоначчи, алгоритм Евклида).
+// ============================================================================
+
+module functions_demo
+
+// 1. Простая чистая функция с явным `return`
+fn calculate(a: i64, b: i64) -> i64 {
+    return a + b
+}
+
+// 2. Функция, возвращающая значение последнего выражения блока
+fn clamp(val: i64, min_val: i64, max_val: i64) -> i64 {
+    if val < min_val {
+        min_val
+    } else if val > max_val {
+        max_val
+    } else {
+        val
+    }
+}
+
+// 3. Рекурсивное вычисление факториала: n!
+fn factorial(n: i64) -> i64 {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+// 4. Хвосторекурсивное вычисление чисел Фибоначчи (оптимизируется компилятором в цикл)
+fn fib_tail(n: i64, prev: i64, curr: i64) -> i64 {
+    if n == 0 {
+        return prev
+    }
+    if n == 1 {
+        return curr
+    }
+    return fib_tail(n - 1, curr, prev + curr)
+}
+
+fn fibonacci(n: i64) -> i64 {
+    return fib_tail(n, 0, 1)
+}
+
+// 5. Наибольший общий делитель (алгоритм Евклида)
+fn gcd(a: i64, b: i64) -> i64 {
+    if b == 0 {
+        return a
+    }
+    return gcd(b, a % b)
+}
+
+fn main() {
+    println("=== Функции и рекурсия в APS ===")
+
+    let sum_result = calculate(125, 375)
+    print("calculate(125, 375) = ")
+    println(sum_result)
+
+    let clamped = clamp(1500, 0, 1000)
+    print("clamp(1500, 0, 1000) = ")
+    println(clamped)
+
+    let fact_10 = factorial(10)
+    print("10! (факториал 10) = ")
+    println(fact_10)
+
+    let fib_20 = fibonacci(20)
+    print("20-е число Фибоначчи = ")
+    println(fib_20)
+
+    let divisor = gcd(252, 105)
+    print("НОД(252, 105) = ")
+    println(divisor)
+}

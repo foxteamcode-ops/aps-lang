@@ -1,0 +1,1 @@
+struct ServerSession { id: i64, active: bool } fn main() { var s = ServerSession { id: 101, active: true }; println(s.id) }

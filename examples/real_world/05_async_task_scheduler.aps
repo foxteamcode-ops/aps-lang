@@ -1,0 +1,142 @@
+// ============================================================================
+// Файл: examples/real_world/05_async_task_scheduler.aps
+// Описание: Асинхронный планировщик задач (`async fn` / `await` / `spawn`)
+// для конкурентного опроса гео-распределённых узлов телеметрии, вычисления SLA
+// и агрегации состояния кластера в реальном времени.
+// ============================================================================
+
+module async_task_scheduler
+
+import std.async
+
+// Результат асинхронного опроса одного узла кластера
+struct NodeHealthSample {
+    node_id: i64
+    datacenter: String
+    latency_ms: i64
+    cpu_usage_pct: i64
+    mem_free_mb: i64
+    healthy: bool
+}
+
+// Сводная статистика цикла планировщика
+struct ClusterHealthSummary {
+    polled_nodes: i64
+    healthy_nodes: i64
+    degraded_nodes: i64
+    avg_latency_ms: i64
+    total_free_mem_mb: i64
+    sla_score_bps: i64
+}
+
+// Асинхронная корутина опроса удалённого сервиса
+async fn poll_remote_service(
+    node_id: i64,
+    dc_name: String,
+    simulated_latency: i64,
+    cpu_pct: i64,
+    free_mb: i64
+) -> NodeHealthSample {
+    let is_ok = simulated_latency < 150 && cpu_pct < 90
+    return NodeHealthSample {
+        node_id: node_id,
+        datacenter: dc_name,
+        latency_ms: simulated_latency,
+        cpu_usage_pct: cpu_pct,
+        mem_free_mb: free_mb,
+        healthy: is_ok
+    }
+}
+
+// Обновление агрегированной сводки по образцу телеметрии (`write ClusterHealthSummary`)
+fn record_sample(summary: write ClusterHealthSummary, sample: read NodeHealthSample) {
+    summary.polled_nodes += 1
+    summary.total_free_mem_mb += sample.mem_free_mb
+    summary.avg_latency_ms += sample.latency_ms
+
+    if sample.healthy {
+        summary.healthy_nodes += 1
+        print("  [ASYNC OK] Узел #")
+        print(sample.node_id)
+        print(" (")
+        print(sample.datacenter)
+        print(") задержкa=")
+        print(sample.latency_ms)
+        print("мс, CPU=")
+        print(sample.cpu_usage_pct)
+        println("%")
+    } else {
+        summary.degraded_nodes += 1
+        print("  [ASYNC DEGRADED] Узел #")
+        print(sample.node_id)
+        print(" (")
+        print(sample.datacenter)
+        print(") превышен порог SLA! задержка=")
+        print(sample.latency_ms)
+        print("мс, CPU=")
+        print(sample.cpu_usage_pct)
+        println("%")
+    }
+}
+
+// Финализация расчёта средних метрик и индекса SLA
+fn finalize_summary(summary: write ClusterHealthSummary) {
+    if summary.polled_nodes > 0 {
+        summary.avg_latency_ms = summary.avg_latency_ms / summary.polled_nodes
+        summary.sla_score_bps = (summary.healthy_nodes * 10000) / summary.polled_nodes
+    }
+}
+
+// Главный асинхронный цикл планировщика
+async fn run_scheduler_round() -> ClusterHealthSummary {
+    println("Запуск конкурентного опроса 4 дата-центров через spawn/await...")
+
+    // Порождаем конкурентные задачи опроса узлов
+    let t1 = spawn poll_remote_service(1, "dc-almaty-1", 18, 42, 8192)
+    let t2 = spawn poll_remote_service(2, "dc-astana-1", 24, 55, 12288)
+    let t3 = spawn poll_remote_service(3, "dc-shymkent-1", 31, 38, 6144)
+    let t4 = spawn poll_remote_service(4, "dc-aktau-edge", 185, 93, 2048)
+
+    // Ожидаем завершения задач (`await`)
+    let s1 = await t1
+    let s2 = await t2
+    let s3 = await t3
+    let s4 = await t4
+
+    var summary = ClusterHealthSummary {
+        polled_nodes: 0,
+        healthy_nodes: 0,
+        degraded_nodes: 0,
+        avg_latency_ms: 0,
+        total_free_mem_mb: 0,
+        sla_score_bps: 0
+    }
+
+    record_sample(write summary, read s1)
+    record_sample(write summary, read s2)
+    record_sample(write summary, read s3)
+    record_sample(write summary, read s4)
+    finalize_summary(write summary)
+
+    return summary
+}
+
+fn main() {
+    println("=== APS Real-World #05: Асинхронный планировщик задач (async/await) ===")
+
+    let summary = await run_scheduler_round()
+
+    println("--- Агрегированная телеметрия кластера ---")
+    print("  Опрошено узлов           : ")
+    println(summary.polled_nodes)
+    print("  Исправных узлов (Healthy): ")
+    println(summary.healthy_nodes)
+    print("  Деградировавших узлов    : ")
+    println(summary.degraded_nodes)
+    print("  Средняя задержка (мс)    : ")
+    println(summary.avg_latency_ms)
+    print("  Свободная память (МБ)    : ")
+    println(summary.total_free_mem_mb)
+    print("  Индекс SLA (баз. п.)     : ")
+    println(summary.sla_score_bps)
+}

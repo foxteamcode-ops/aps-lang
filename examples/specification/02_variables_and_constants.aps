@@ -1,0 +1,64 @@
+// ============================================================================
+// Файл: 02_variables_and_constants.aps
+// Описание: Неизменяемые переменные (`let`), изменяемые переменные (`var`),
+// константы времени компиляции (`const`), вывод типов и затенение (shadowing).
+// ============================================================================
+
+module variables_demo
+
+// Константы вычисляются строго на этапе компиляции (compile-time)
+// и обязаны иметь явную аннотацию типа.
+const MAX_LIMIT: i64 = 1000
+const MIN_BALANCE: i64 = 0
+const SYSTEM_NAME: String = "APS Core Engine"
+const PI_APPROX: f64 = 3.141592653589793
+
+fn main() {
+    println("=== Демонстрация переменных и констант в APS ===")
+
+    // 1. Неизменяемые привязки (`let`) с явной аннотацией типа
+    let x: i64 = 10
+    let is_ready: bool = true
+
+    // 2. Неизменяемые привязки (`let`) с автоматическим выводом типа (Type Inference)
+    let y = 25                  // Выводится тип i64 по умолчанию для целых
+    let ratio = 0.75            // Выводится тип f64 по умолчанию для дробных
+    let greeting = "Привет, APS" // Выводится тип String
+
+    print("Неизменяемые значения: x = ")
+    print(x)
+    print(", y = ")
+    print(y)
+    print(", ratio = ")
+    println(ratio)
+
+    // Попытка изменить `x = 20` приведёт к ошибке компиляции E0201 (Immutable Assignment).
+
+    // 3. Изменяемые переменные (`var`)
+    var count: i64 = 0
+    println("Начальное значение счётчика count: 0")
+
+    count = count + 1
+    count += 5
+    print("После инкрементов count = ")
+    println(count)
+
+    // Проверка относительно константы времени компиляции
+    if count < MAX_LIMIT && is_ready {
+        print("Счётчик в пределах лимита MAX_LIMIT (")
+        print(MAX_LIMIT)
+        println(")")
+    }
+
+    // 4. Лексическое затенение (Shadowing) неизменяемой переменной
+    // Позволяет трансформировать значение и зафиксировать его под тем же именем
+    let raw_input = 42
+    let raw_input = raw_input * 2 + 16
+    print("Затенённое и вычисленное значение raw_input = ")
+    println(raw_input)
+
+    print("Система: ")
+    print(SYSTEM_NAME)
+    print(", константа PI = ")
+    println(PI_APPROX)
+}

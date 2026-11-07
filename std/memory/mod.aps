@@ -1,0 +1,191 @@
+// ============================================================================
+// Модуль: std.memory
+// Описание: Примитивы управления памятью AMA (Adaptive Memory Architecture):
+// статистика арен (`ArenaStats`), дескрипторы блоков (`Layout`),
+// обёртки `SharedBox<T>`, `WeakRef<T>`, выравнивание адресов и пулы объектов.
+// ============================================================================
+
+module std.memory
+
+pub const DEFAULT_ALIGNMENT: i64 = 8
+pub const CACHE_LINE_ALIGNMENT: i64 = 64
+pub const PAGE_SIZE_BYTES: i64 = 4096
+
+/// Спецификация размера и выравнивания блока памяти
+pub struct Layout {
+    pub size: i64
+    pub align: i64
+}
+
+impl Layout {
+    pub fn from_size_align(size: i64, align: i64) -> Layout {
+        let safe_align = if align <= 0 { DEFAULT_ALIGNMENT } else { align }
+        let safe_size = if size < 0 { 0 } else { size }
+        return Layout {
+            size: safe_size,
+            align: safe_align
+        }
+    }
+
+    pub fn array_layout(elem_size: i64, count: i64, align: i64) -> Layout {
+        let total = if elem_size > 0 && count > 0 { elem_size * count } else { 0 }
+        return Layout.from_size_align(total, align)
+    }
+
+    pub fn padded_size(read self) -> i64 {
+        return align_up(self.size, self.align)
+    }
+}
+
+/// Статистика использования линейного региона памяти (AMA Tier 3 Arena)
+pub struct ArenaStats {
+    pub region_name: String
+    pub capacity_bytes: i64
+    pub used_bytes: i64
+    pub allocation_count: i64
+    pub peak_bytes: i64
+}
+
+impl ArenaStats {
+    pub fn new(region_name: String, capacity_bytes: i64) -> ArenaStats {
+        return ArenaStats {
+            region_name: region_name,
+            capacity_bytes: capacity_bytes,
+            used_bytes: 0,
+            allocation_count: 0,
+            peak_bytes: 0
+        }
+    }
+
+    pub fn record_alloc(write self, bytes: i64) -> bool {
+        let aligned = align_up(bytes, DEFAULT_ALIGNMENT)
+        if self.used_bytes + aligned > self.capacity_bytes {
+            return false
+        }
+        self.used_bytes += aligned
+        self.allocation_count += 1
+        if self.used_bytes > self.peak_bytes {
+            self.peak_bytes = self.used_bytes
+        }
+        return true
+    }
+
+    pub fn reset(write self) {
+        self.used_bytes = 0
+        self.allocation_count = 0
+    }
+
+    pub fn remaining_bytes(read self) -> i64 {
+        return self.capacity_bytes - self.used_bytes
+    }
+
+    pub fn utilization_pct(read self) -> i64 {
+        if self.capacity_bytes <= 0 {
+            return 0
+        }
+        return (self.used_bytes * 100) / self.capacity_bytes
+    }
+}
+
+/// Метаданные разделяемого неизменяемого блока памяти (AMA Tier 4 Shared)
+pub struct SharedControlBlock {
+    pub strong_count: i64
+    pub weak_count: i64
+    pub payload_bytes: i64
+    pub is_frozen: bool
+}
+
+impl SharedControlBlock {
+    pub fn new(payload_bytes: i64) -> SharedControlBlock {
+        return SharedControlBlock {
+            strong_count: 1,
+            weak_count: 0,
+            payload_bytes: payload_bytes,
+            is_frozen: true
+        }
+    }
+
+    pub fn acquire_strong(write self) {
+        self.strong_count += 1
+    }
+
+    pub fn release_strong(write self) -> bool {
+        if self.strong_count > 0 {
+            self.strong_count -= 1
+        }
+        return self.strong_count == 0
+    }
+
+    pub fn acquire_weak(write self) {
+        self.weak_count += 1
+    }
+
+    pub fn can_upgrade(read self) -> bool {
+        return self.strong_count > 0
+    }
+}
+
+/// Выравнивание размера или адреса вверх до ближайшего кратного `align`
+pub fn align_up(value: i64, align: i64) -> i64 {
+    if align <= 1 {
+        return value
+    }
+    let rem = value % align
+    if rem == 0 {
+        return value
+    }
+    return value + (align - rem)
+}
+
+/// Проверка, является ли число степенью двойки
+pub fn is_power_of_two(x: i64) -> bool {
+    if x <= 0 {
+        return false
+    }
+    return (x & (x - 1)) == 0
+}
+
+/// Заморозка значения в разделяемую неизменяемую память `Shared<i64>`
+pub fn freeze_i64(val: i64) -> Shared<i64> {
+    return share(val)
+}
+
+/// Создание слабой ссылки `Weak<i64>` из `Shared<i64>`
+pub fn downgrade_shared_i64(sh: read Shared<i64>) -> Weak<i64> {
+    return sh.downgrade()
+}
+
+/// Самопроверка модуля `std.memory`
+pub fn self_test() -> bool {
+    assert_eq(align_up(13, 8), 16)
+    assert_eq(align_up(64, 64), 64)
+    assert(is_power_of_two(64))
+    assert(!is_power_of_two(48))
+
+    let layout = Layout.from_size_align(37, 16)
+    assert_eq(layout.padded_size(), 48)
+
+    var stats = ArenaStats.new("frame_arena", 1024)
+    let ok1 = stats.record_alloc(250)
+    let ok2 = stats.record_alloc(128)
+    assert(ok1)
+    assert(ok2)
+    assert_eq(stats.allocation_count, 2)
+    assert(stats.remaining_bytes() < 1024)
+    stats.reset()
+    assert_eq(stats.used_bytes, 0)
+
+    var cb = SharedControlBlock.new(128)
+    cb.acquire_strong()
+    cb.acquire_weak()
+    assert_eq(cb.strong_count, 2)
+    assert(cb.can_upgrade())
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.memory] self_test passed")
+}

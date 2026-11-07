@@ -1,0 +1,156 @@
+// ============================================================================
+// Модуль: std.testing
+// Описание: Фреймворк модульного тестирования, проверок утверждений
+// и микробенчмаркинга: `TestSuite`, `TestCaseResult`, `BenchTimer`,
+// `expect_true`, `expect_eq_i64`, `expect_ne_i64`.
+// ============================================================================
+
+module std.testing
+
+/// Результат выполнения одного тестового сценария (`TestCaseResult`)
+pub struct TestCaseResult {
+    pub name: String
+    pub passed: bool
+    pub assertions_checked: i64
+    pub elapsed_ns: i64
+}
+
+impl TestCaseResult {
+    pub fn ok(name: String, assertions_checked: i64, elapsed_ns: i64) -> TestCaseResult {
+        return TestCaseResult {
+            name: name,
+            passed: true,
+            assertions_checked: assertions_checked,
+            elapsed_ns: elapsed_ns
+        }
+    }
+
+    pub fn fail(name: String, assertions_checked: i64, elapsed_ns: i64) -> TestCaseResult {
+        return TestCaseResult {
+            name: name,
+            passed: false,
+            assertions_checked: assertions_checked,
+            elapsed_ns: elapsed_ns
+        }
+    }
+}
+
+/// Набор модульных тестов (`TestSuite`)
+pub struct TestSuite {
+    pub suite_name: String
+    pub total_run: i64
+    pub passed_count: i64
+    pub failed_count: i64
+    pub total_assertions: i64
+}
+
+impl TestSuite {
+    pub fn new(suite_name: String) -> TestSuite {
+        return TestSuite {
+            suite_name: suite_name,
+            total_run: 0,
+            passed_count: 0,
+            failed_count: 0,
+            total_assertions: 0
+        }
+    }
+
+    pub fn record_case(write self, result: read TestCaseResult) {
+        self.total_run += 1
+        self.total_assertions += result.assertions_checked
+        if result.passed {
+            self.passed_count += 1
+        } else {
+            self.failed_count += 1
+        }
+    }
+
+    pub fn all_passed(read self) -> bool {
+        return self.total_run > 0 && self.failed_count == 0
+    }
+}
+
+/// Таймер микробенчмарков (`BenchTimer`)
+pub struct BenchTimer {
+    pub benchmark_name: String
+    pub iterations: i64
+    pub total_ns: i64
+}
+
+impl BenchTimer {
+    pub fn new(benchmark_name: String, iterations: i64) -> BenchTimer {
+        let iters = if iterations <= 0 { 1 } else { iterations }
+        return BenchTimer {
+            benchmark_name: benchmark_name,
+            iterations: iters,
+            total_ns: 0
+        }
+    }
+
+    pub fn record_sample_ns(write self, sample_ns: i64) {
+        if sample_ns > 0 {
+            self.total_ns += sample_ns
+        }
+    }
+
+    pub fn avg_ns_per_iter(read self) -> i64 {
+        if self.iterations <= 0 {
+            return 0
+        }
+        return self.total_ns / self.iterations
+    }
+}
+
+/// Проверка истинности условия с немедленной фиксацией инварианта
+pub fn expect_true(cond: bool) -> bool {
+    assert(cond)
+    return cond
+}
+
+/// Проверка равенства двух значений
+pub fn expect_eq(actual: i64, expected: i64) -> bool {
+    assert_eq(actual, expected)
+    return actual == expected
+}
+
+/// Проверка равенства двух 64-битных целых чисел
+pub fn expect_eq_i64(actual: i64, expected: i64) -> bool {
+    assert_eq(actual, expected)
+    return actual == expected
+}
+
+/// Проверка неравенства двух 64-битных целых чисел
+pub fn expect_ne_i64(actual: i64, unexpected: i64) -> bool {
+    let ok = actual != unexpected
+    assert(ok)
+    return ok
+}
+
+/// Самопроверка модуля `std.testing`
+pub fn self_test() -> bool {
+    assert(expect_true(2 + 2 == 4))
+    assert(expect_eq_i64(10 * 5, 50))
+    assert(expect_ne_i64(10, 20))
+
+    var suite = TestSuite.new("std_unit_suite")
+    let c1 = TestCaseResult.ok("test_ama_stack", 5, 1200)
+    let c2 = TestCaseResult.ok("test_ama_region", 8, 950)
+    suite.record_case(read c1)
+    suite.record_case(read c2)
+
+    assert(suite.all_passed())
+    assert_eq(suite.passed_count, 2)
+    assert_eq(suite.total_assertions, 13)
+
+    var bench = BenchTimer.new("arena_alloc_bench", 100)
+    bench.record_sample_ns(5000)
+    assert_eq(bench.avg_ns_per_iter(), 50)
+
+    return true
+}
+
+fn main() {
+    let ok = self_test()
+    assert(ok)
+    println("[std.testing] self_test passed")
+}

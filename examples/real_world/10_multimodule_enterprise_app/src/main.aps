@@ -1,0 +1,194 @@
+// ============================================================================
+// Файл: examples/real_world/10_multimodule_enterprise_app/src/main.aps
+// Описание: Точка входа многомодульного корпоративного приложения
+// `aps_enterprise_fleet` (объединяет доменную модель `domain`, репозиторий
+// `repository` и сервисный слой `service`).
+// ============================================================================
+
+module enterprise_main
+
+import domain
+import repository
+import service
+
+struct EnterpriseConfig {
+    company_name: String
+    tax_rate_bps: i64
+    commission_bps: i64
+    min_payout_kzt: i64
+}
+
+struct Driver {
+    id: i64
+    name: String
+    balance: i64
+    completed_trips: i64
+    mileage_km: i64
+}
+
+struct CorporateTrip {
+    trip_id: i64
+    client_company: String
+    distance_km: i64
+    rate_per_km: i64
+}
+
+struct FleetLedger {
+    total_trips: i64
+    gross_revenue: i64
+    taxes_collected: i64
+    platform_commission: i64
+    driver_payouts: i64
+}
+
+fn show_driver(driver: read Driver) {
+    print("  [Водитель #")
+    print(driver.id)
+    print("] ")
+    print(driver.name)
+    print(" | Баланс: ")
+    print(driver.balance)
+    print(" KZT | Поездок: ")
+    print(driver.completed_trips)
+    print(" | Пробег (км): ")
+    println(driver.mileage_km)
+}
+
+// Исполнение корпоративного заказа с обновлением состояния водителя и книги учёта
+fn execute_enterprise_trip(
+    driver: write Driver,
+    ledger: write FleetLedger,
+    trip: read CorporateTrip,
+    cfg: read Shared<EnterpriseConfig>
+) -> Result<i64, String> {
+    var trip_res: Result<i64, String> = Err("Ошибка параметров корпоративного рейса")
+
+    if trip.distance_km > 0 && trip.rate_per_km > 0 {
+        let gross = trip.distance_km * trip.rate_per_km
+        let tax = (gross * cfg.tax_rate_bps) / 10000
+        let comm = (gross * cfg.commission_bps) / 10000
+        let net_payout = gross - tax - comm
+
+        if net_payout >= cfg.min_payout_kzt {
+            driver.balance += net_payout
+            driver.completed_trips += 1
+            driver.mileage_km += trip.distance_km
+
+            ledger.total_trips += 1
+            ledger.gross_revenue += gross
+            ledger.taxes_collected += tax
+            ledger.platform_commission += comm
+            ledger.driver_payouts += net_payout
+
+            trip_res = Ok(net_payout)
+        }
+    }
+
+    return trip_res
+}
+
+fn print_enterprise_summary(
+    cfg: read Shared<EnterpriseConfig>,
+    ledger: read FleetLedger
+) {
+    println("============================================================")
+    print("КОРПОРАТИВНЫЙ ОТЧЁТ: ")
+    println(cfg.company_name)
+    println("============================================================")
+    print("  Выполнено корпоративных рейсов : ")
+    println(ledger.total_trips)
+    print("  Валовая выручка (Gross KZT)    : ")
+    println(ledger.gross_revenue)
+    print("  Удержано налогов НДС (12%)     : ")
+    println(ledger.taxes_collected)
+    print("  Комиссия платформы (10%)       : ")
+    println(ledger.platform_commission)
+    print("  Чистые выплаты водителям (KZT) : ")
+    println(ledger.driver_payouts)
+    println("============================================================")
+}
+
+fn main() {
+    println("=== APS Real-World #10: Многомодульное Enterprise-приложение ===")
+
+    let raw_cfg = EnterpriseConfig {
+        company_name: "APS Enterprise Fleet KZ",
+        tax_rate_bps: 1200,
+        commission_bps: 1000,
+        min_payout_kzt: 500
+    }
+
+    // Замораживаем конфигурацию предприятия в разделяемой неизменяемой памяти AMA
+    let shared_cfg = share(raw_cfg)
+
+    defer {
+        println("[defer] Сессия корпоративного приложения корректно завершена.")
+    }
+
+    var ledger = FleetLedger {
+        total_trips: 0,
+        gross_revenue: 0,
+        taxes_collected: 0,
+        platform_commission: 0,
+        driver_payouts: 0
+    }
+
+    var d1 = Driver { id: 1, name: "Alibek", balance: 10000, completed_trips: 5, mileage_km: 120 }
+    var d2 = Driver { id: 2, name: "Timur",  balance: 7500,  completed_trips: 3, mileage_km: 85 }
+
+    println("--- Состояние автопарка на начало смены ---")
+    show_driver(read d1)
+    show_driver(read d2)
+
+    // Обработка пакета корпоративных рейсов внутри аренного региона `batch_arena`
+    region batch_arena {
+        let trip1 = CorporateTrip {
+            trip_id: 7001,
+            client_company: "Kaspi Tech Hub",
+            distance_km: 40,
+            rate_per_km: 300
+        }
+        let trip2 = CorporateTrip {
+            trip_id: 7002,
+            client_company: "Astana IT Park",
+            distance_km: 25,
+            rate_per_km: 320
+        }
+        let trip3 = CorporateTrip {
+            trip_id: 7003,
+            client_company: "Almaty Logistics",
+            distance_km: 60,
+            rate_per_km: 250
+        }
+
+        match execute_enterprise_trip(write d1, write ledger, read trip1, read shared_cfg) {
+            Ok(payout) => {
+                print("  [Рейс #7001 OK] Чистая выплата Alibek: ")
+                println(payout)
+            }
+            Err(_) => println("  [Рейс #7001] Ошибка")
+        }
+
+        match execute_enterprise_trip(write d2, write ledger, read trip2, read shared_cfg) {
+            Ok(payout) => {
+                print("  [Рейс #7002 OK] Чистая выплата Timur: ")
+                println(payout)
+            }
+            Err(_) => println("  [Рейс #7002] Ошибка")
+        }
+
+        match execute_enterprise_trip(write d1, write ledger, read trip3, read shared_cfg) {
+            Ok(payout) => {
+                print("  [Рейс #7003 OK] Чистая выплата Alibek: ")
+                println(payout)
+            }
+            Err(_) => println("  [Рейс #7003] Ошибка")
+        }
+    }
+
+    println("--- Состояние автопарка по окончании смены ---")
+    show_driver(read d1)
+    show_driver(read d2)
+
+    print_enterprise_summary(read shared_cfg, read ledger)
+}

@@ -1,0 +1,95 @@
+// ============================================================================
+// Файл: 10_enums_and_algebraic_types.aps
+// Описание: Алгебраические типы данных (перечисления `enum` с полезной нагрузкой)
+// и их безопасная обработка через сопоставление с образцом `match`.
+// ============================================================================
+
+module enums_demo
+
+// Каноническое перечисление состояния задачи `Status`
+enum Status {
+    Idle
+    Running(i64)
+    Failed(String)
+}
+
+// Алгебраический тип для платёжной транзакции
+enum PaymentEvent {
+    Authorized(i64, String)
+    Captured(i64)
+    Refunded(i64, String)
+    Rejected(String)
+}
+
+fn print_status(status: read Status) {
+    match status {
+        Status.Idle => {
+            println("[Status] Система в режиме ожидания (Idle)")
+        }
+        Status.Running(progress_pct) => {
+            print("[Status] Выполняется задача, прогресс: ")
+            print(progress_pct)
+            println("%")
+        }
+        Status.Failed(err_reason) => {
+            print("[Status] Ошибка выполнения: ")
+            println(err_reason)
+        }
+    }
+}
+
+fn process_payment_event(event: read PaymentEvent) -> i64 {
+    match event {
+        PaymentEvent.Authorized(amount, currency) => {
+            print("Авторизован платёж на сумму ")
+            print(amount)
+            print(" ")
+            println(currency)
+            return 0
+        }
+        PaymentEvent.Captured(amount) => {
+            print("Списаны средства: +")
+            println(amount)
+            return amount
+        }
+        PaymentEvent.Refunded(amount, reason) => {
+            print("Возврат средств (-")
+            print(amount)
+            print("), причина: ")
+            println(reason)
+            return -amount
+        }
+        PaymentEvent.Rejected(reason) => {
+            print("Транзакция отклонена: ")
+            println(reason)
+            return 0
+        }
+    }
+}
+
+fn main() {
+    println("=== Алгебраические типы данных (enum) в APS ===")
+
+    let st_idle = Status.Idle
+    let st_run  = Status.Running(75)
+    let st_fail = Status.Failed("Таймаут соединения с узлом кластера")
+
+    print_status(read st_idle)
+    print_status(read st_run)
+    print_status(read st_fail)
+
+    println("--- Обработка финансовых событий ---")
+    let ev1 = PaymentEvent.Authorized(5000, "KZT")
+    let ev2 = PaymentEvent.Captured(5000)
+    let ev3 = PaymentEvent.Refunded(1200, "Частичная отмена заказа")
+    let ev4 = PaymentEvent.Rejected("Недостаточно средств")
+
+    var net_cashflow: i64 = 0
+    net_cashflow += process_payment_event(read ev1)
+    net_cashflow += process_payment_event(read ev2)
+    net_cashflow += process_payment_event(read ev3)
+    net_cashflow += process_payment_event(read ev4)
+
+    print("Итоговый чистый денежный поток: ")
+    println(net_cashflow)
+}

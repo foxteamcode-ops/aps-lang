@@ -1,0 +1,1 @@
+struct StockItem { sku: String, qty: i64 } fn add_stock(item: write StockItem, delta: i64) { item.qty += delta } fn main() { var it = StockItem { sku: "APS-101", qty: 50 }; add_stock(write it, 15); println(it.qty) }
