@@ -123,7 +123,10 @@ impl Optimizer {
                     let opt_init = self.optimize_expr_with_env(init, local_consts);
                     if matches!(
                         opt_init.kind,
-                        ExprKind::IntLit(_, _) | ExprKind::FloatLit(_, _) | ExprKind::BoolLit(_)
+                        ExprKind::IntLit(_, _)
+                            | ExprKind::FloatLit(_, _)
+                            | ExprKind::BoolLit(_)
+                            | ExprKind::StringLit(_)
                     ) {
                         local_consts.insert(name.clone(), opt_init.clone());
                     }
@@ -367,6 +370,21 @@ impl Optimizer {
                     }
                 }
 
+                // Constant Folding for strings
+                if let (ExprKind::StringLit(ls), ExprKind::StringLit(rs)) = (&l.kind, &r.kind) {
+                    let folded = match op {
+                        BinOp::Eq => Some(ExprKind::BoolLit(ls == rs)),
+                        BinOp::Ne => Some(ExprKind::BoolLit(ls != rs)),
+                        BinOp::Add => Some(ExprKind::StringLit(format!("{}{}", ls, rs))),
+                        _ => None,
+                    };
+                    if let Some(kind) = folded {
+                        self.stats.constants_folded += 1;
+                        return Expr { kind, span };
+                    }
+                }
+
+
                 // Constant Folding for floats
                 if let (ExprKind::FloatLit(lv, lsuf), ExprKind::FloatLit(rv, _)) = (&l.kind, &r.kind)
                 {
@@ -494,6 +512,33 @@ impl Optimizer {
                     span,
                 }
             }
+            ExprKind::MethodCall { receiver, method, args } => {
+                let opt_recv = self.optimize_expr_with_env(receiver, env);
+                if (method == "len" || method == "byte_len") && args.is_empty() {
+                    if let ExprKind::StringLit(s) = &opt_recv.kind {
+                        self.stats.constants_folded += 1;
+                        return Expr {
+                            kind: ExprKind::IntLit(s.len() as i64, None),
+                            span,
+                        };
+                    }
+                }
+                let opt_args = args
+                    .iter()
+                    .map(|a| CallArg {
+                        capability: a.capability,
+                        expr: self.optimize_expr_with_env(&a.expr, env),
+                    })
+                    .collect();
+                Expr {
+                    kind: ExprKind::MethodCall {
+                        receiver: Box::new(opt_recv),
+                        method: method.clone(),
+                        args: opt_args,
+                    },
+                    span,
+                }
+            }
             _ => expr.clone(),
         }
     }
@@ -592,6 +637,20 @@ impl Optimizer {
                 kind: ExprKind::Cast {
                     expr: Box::new(Self::substitute_params(inner, map)),
                     ty: ty.clone(),
+                },
+                span,
+            },
+            ExprKind::MethodCall { receiver, method, args } => Expr {
+                kind: ExprKind::MethodCall {
+                    receiver: Box::new(Self::substitute_params(receiver, map)),
+                    method: method.clone(),
+                    args: args
+                        .iter()
+                        .map(|a| CallArg {
+                            capability: a.capability,
+                            expr: Self::substitute_params(&a.expr, map),
+                        })
+                        .collect(),
                 },
                 span,
             },

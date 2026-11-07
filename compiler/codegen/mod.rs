@@ -152,16 +152,16 @@ declare void @aps_eprintln_str(ptr)
 declare void @aps_panic(ptr, ptr, i64) cold noreturn
 declare void @aps_bounds_check(i64, i64, ptr, i64) cold noreturn
 declare void @aps_assert(i64, ptr)
-declare ptr @aps_alloc(i64)
+declare noalias ptr @aps_alloc(i64) willreturn
 declare void @aps_free(ptr)
 declare void @aps_vec_push(ptr, i64)
 declare i64 @aps_vec_pop(ptr)
 declare ptr @aps_region_begin(ptr, i64)
-declare ptr @aps_region_alloc(ptr, i64)
+declare noalias ptr @aps_region_alloc(ptr, i64) willreturn
 declare void @aps_region_end(ptr)
 declare i64 @aps_str_len(ptr) readonly willreturn nounwind
 declare i64 @aps_str_eq(ptr, ptr) readonly willreturn nounwind
-declare ptr @aps_str_concat(ptr, ptr) willreturn
+declare noalias ptr @aps_str_concat(ptr, ptr) willreturn
 declare ptr @aps_int_to_str(i64) willreturn
 declare i64 @aps_time_now_ms()
 declare i64 @aps_time_now_ns()
@@ -778,19 +778,25 @@ declare void @aps_tcp_close(i64)
                     out.push_str(&format!("  {} = {} double {}, {}\n", res, fop, cur_val, rhs_val));
                 } else {
                     if matches!(op, AssignOp::DivAssign | AssignOp::RemAssign) {
-                        let is_zero = self.next_reg();
-                        let div_ok = self.next_label("div_ok");
-                        let div_fail = self.next_label("div_fail");
-                        let err_str = self.intern_string("attempt to divide by zero in compound assignment");
-                        let file_str = self.intern_string(&target.span.file);
-                        out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, rhs_val));
-                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_zero, div_fail, div_ok));
-                        out.push_str(&format!("{}:\n", div_fail));
-                        out.push_str(&format!(
-                            "  call void @aps_panic(ptr {}, ptr {}, i64 {})\n  unreachable\n",
-                            err_str, file_str, target.span.line
-                        ));
-                        out.push_str(&format!("{}:\n", div_ok));
+                        let is_known_non_zero = match rhs_val.parse::<i64>() {
+                            Ok(c) => c != 0,
+                            Err(_) => false,
+                        };
+                        if !is_known_non_zero {
+                            let is_zero = self.next_reg();
+                            let div_ok = self.next_label("div_ok");
+                            let div_fail = self.next_label("div_fail");
+                            let err_str = self.intern_string("attempt to divide by zero in compound assignment");
+                            let file_str = self.intern_string(&target.span.file);
+                            out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, rhs_val));
+                            out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_zero, div_fail, div_ok));
+                            out.push_str(&format!("{}:\n", div_fail));
+                            out.push_str(&format!(
+                                "  call void @aps_panic(ptr {}, ptr {}, i64 {})\n  unreachable\n",
+                                err_str, file_str, target.span.line
+                            ));
+                            out.push_str(&format!("{}:\n", div_ok));
+                        }
                     }
                     let iop = match op {
                         AssignOp::AddAssign => "add",
@@ -1135,37 +1141,53 @@ declare void @aps_tcp_close(i64)
                             (res, Type::I64)
                         }
                         BinOp::Div => {
-                            let is_zero = self.next_reg();
-                            let div_ok = self.next_label("div_ok");
-                            let div_fail = self.next_label("div_fail");
-                            let err_str = self.intern_string("attempt to divide by zero");
-                            let file_str = self.intern_string(&expr.span.file);
-                            out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, rv));
-                            out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_zero, div_fail, div_ok));
-                            out.push_str(&format!("{}:\n", div_fail));
-                            out.push_str(&format!(
-                                "  call void @aps_panic(ptr {}, ptr {}, i64 {})\n  unreachable\n",
-                                err_str, file_str, expr.span.line
-                            ));
-                            out.push_str(&format!("{}:\n", div_ok));
-                            out.push_str(&format!("  {} = sdiv i64 {}, {}\n", res, lv, rv));
+                            let is_known_non_zero = match rv.parse::<i64>() {
+                                Ok(c) => c != 0,
+                                Err(_) => false,
+                            };
+                            if is_known_non_zero {
+                                out.push_str(&format!("  {} = sdiv i64 {}, {}\n", res, lv, rv));
+                            } else {
+                                let is_zero = self.next_reg();
+                                let div_ok = self.next_label("div_ok");
+                                let div_fail = self.next_label("div_fail");
+                                let err_str = self.intern_string("attempt to divide by zero");
+                                let file_str = self.intern_string(&expr.span.file);
+                                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, rv));
+                                out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_zero, div_fail, div_ok));
+                                out.push_str(&format!("{}:\n", div_fail));
+                                out.push_str(&format!(
+                                    "  call void @aps_panic(ptr {}, ptr {}, i64 {})\n  unreachable\n",
+                                    err_str, file_str, expr.span.line
+                                ));
+                                out.push_str(&format!("{}:\n", div_ok));
+                                out.push_str(&format!("  {} = sdiv i64 {}, {}\n", res, lv, rv));
+                            }
                             (res, Type::I64)
                         }
                         BinOp::Rem => {
-                            let is_zero = self.next_reg();
-                            let rem_ok = self.next_label("rem_ok");
-                            let rem_fail = self.next_label("rem_fail");
-                            let err_str = self.intern_string("attempt to calculate remainder with zero divisor");
-                            let file_str = self.intern_string(&expr.span.file);
-                            out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, rv));
-                            out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_zero, rem_fail, rem_ok));
-                            out.push_str(&format!("{}:\n", rem_fail));
-                            out.push_str(&format!(
-                                "  call void @aps_panic(ptr {}, ptr {}, i64 {})\n  unreachable\n",
-                                err_str, file_str, expr.span.line
-                            ));
-                            out.push_str(&format!("{}:\n", rem_ok));
-                            out.push_str(&format!("  {} = srem i64 {}, {}\n", res, lv, rv));
+                            let is_known_non_zero = match rv.parse::<i64>() {
+                                Ok(c) => c != 0,
+                                Err(_) => false,
+                            };
+                            if is_known_non_zero {
+                                out.push_str(&format!("  {} = srem i64 {}, {}\n", res, lv, rv));
+                            } else {
+                                let is_zero = self.next_reg();
+                                let rem_ok = self.next_label("rem_ok");
+                                let rem_fail = self.next_label("rem_fail");
+                                let err_str = self.intern_string("attempt to calculate remainder with zero divisor");
+                                let file_str = self.intern_string(&expr.span.file);
+                                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, rv));
+                                out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_zero, rem_fail, rem_ok));
+                                out.push_str(&format!("{}:\n", rem_fail));
+                                out.push_str(&format!(
+                                    "  call void @aps_panic(ptr {}, ptr {}, i64 {})\n  unreachable\n",
+                                    err_str, file_str, expr.span.line
+                                ));
+                                out.push_str(&format!("{}:\n", rem_ok));
+                                out.push_str(&format!("  {} = srem i64 {}, {}\n", res, lv, rv));
+                            }
                             (res, Type::I64)
                         }
                         BinOp::BitAnd | BinOp::And => {

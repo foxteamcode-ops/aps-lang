@@ -62,12 +62,17 @@ typedef struct ApsVec {
 } ApsVec;
 
 static int g_aps_utf8_initialized = 0;
+static int64_t g_aps_perf_freq = 0;
+static int64_t aps_get_perf_freq(void);
 
 static void aps_ensure_utf8_console(void) {
     if (!g_aps_utf8_initialized) {
 #ifdef _WIN32
         SetConsoleOutputCP(65001);
         SetConsoleCP(65001);
+        LARGE_INTEGER freq;
+        QueryPerformanceFrequency(&freq);
+        g_aps_perf_freq = freq.QuadPart > 0 ? freq.QuadPart : 1;
 #endif
         g_aps_utf8_initialized = 1;
     }
@@ -193,7 +198,7 @@ static APS_THREAD_LOCAL ApsRegion* g_tl_cached_region = NULL;
 void* aps_region_begin(const char* name, int64_t initial_cap) {
     if (initial_cap < 4096) initial_cap = 65536;
 
-    // Fast-path: Reuse thread-local cached region block (0 heap allocations)
+    // Ultra-Fast Path: Reuse thread-local cached region block (0 heap allocations, O(1) reset)
     if (g_tl_cached_region != NULL) {
         ApsRegion* reg = g_tl_cached_region;
         g_tl_cached_region = NULL;
@@ -201,23 +206,17 @@ void* aps_region_begin(const char* name, int64_t initial_cap) {
         reg->total_allocated = 0;
         ApsRegionBlock* cur = reg->head;
         if (cur) {
-            // Trim any chained overflow blocks back to the primary cached block
-            ApsRegionBlock* extra = cur->next;
-            while (extra) {
-                ApsRegionBlock* next = extra->next;
-                if (extra->data) free(extra->data);
-                free(extra);
-                extra = next;
-            }
-            cur->next = NULL;
-            cur->used = 0;
-            if (cur->capacity < (size_t)initial_cap) {
-                uint8_t* new_data = (uint8_t*)realloc(cur->data, (size_t)initial_cap);
-                if (new_data) {
-                    cur->data = new_data;
-                    cur->capacity = (size_t)initial_cap;
+            if (cur->next) {
+                ApsRegionBlock* extra = cur->next;
+                while (extra) {
+                    ApsRegionBlock* next = extra->next;
+                    if (extra->data) free(extra->data);
+                    free(extra);
+                    extra = next;
                 }
+                cur->next = NULL;
             }
+            cur->used = 0;
             return (void*)reg;
         }
     }
@@ -242,19 +241,25 @@ void* aps_region_alloc(void* region_ptr, int64_t size) {
     ApsRegion* reg = (ApsRegion*)region_ptr;
     size_t aligned_size = ((size_t)(size <= 0 ? 8 : size) + 7u) & ~7u;
     ApsRegionBlock* blk = reg->head;
-    if (!blk || blk->used + aligned_size > blk->capacity) {
-        size_t new_cap = blk ? blk->capacity * 2 : 65536;
-        if (new_cap < aligned_size) new_cap = aligned_size * 2;
-        ApsRegionBlock* next_blk = (ApsRegionBlock*)malloc(sizeof(ApsRegionBlock));
-        if (!next_blk) aps_panic("out of memory in region extension", "<runtime>", 0);
-        next_blk->data = (uint8_t*)malloc(new_cap);
-        if (!next_blk->data) aps_panic("out of memory in region block buffer", "<runtime>", 0);
-        next_blk->capacity = new_cap;
-        next_blk->used = 0;
-        next_blk->next = blk;
-        reg->head = next_blk;
-        blk = next_blk;
+    // 1-cycle bump allocation fast path
+    if (blk && blk->used + aligned_size <= blk->capacity) {
+        void* ptr = (void*)(blk->data + blk->used);
+        blk->used += aligned_size;
+        reg->total_allocated += aligned_size;
+        return ptr;
     }
+    // Overflow extension path
+    size_t new_cap = blk ? blk->capacity * 2 : 65536;
+    if (new_cap < aligned_size) new_cap = aligned_size * 2;
+    ApsRegionBlock* next_blk = (ApsRegionBlock*)malloc(sizeof(ApsRegionBlock));
+    if (!next_blk) aps_panic("out of memory in region extension", "<runtime>", 0);
+    next_blk->data = (uint8_t*)malloc(new_cap);
+    if (!next_blk->data) aps_panic("out of memory in region block buffer", "<runtime>", 0);
+    next_blk->capacity = new_cap;
+    next_blk->used = 0;
+    next_blk->next = blk;
+    reg->head = next_blk;
+    blk = next_blk;
     void* ptr = (void*)(blk->data + blk->used);
     blk->used += aligned_size;
     reg->total_allocated += aligned_size;
@@ -291,19 +296,44 @@ int64_t aps_str_eq(const char* a, const char* b) {
     return strcmp(a, b) == 0 ? 1 : 0;
 }
 
+/* Thread-Local String Slab Buffer for Zero-Cost SSO / Concatenations */
+#define APS_STR_SLAB_SIZE 262144
+static APS_THREAD_LOCAL char* g_tl_str_slab = NULL;
+static APS_THREAD_LOCAL size_t g_tl_str_slab_used = 0;
+
 const char* aps_str_concat(const char* a, const char* b) {
     if (!a) a = "";
     if (!b) b = "";
     size_t la = strlen(a);
     size_t lb = strlen(b);
-    if (la > SIZE_MAX - lb - 1) {
+    if (la == 0) return b;
+    if (lb == 0) return a;
+    size_t total_len = la + lb;
+    if (total_len > SIZE_MAX - 1) {
         aps_panic("string concatenation size overflow", "<runtime>", 0);
     }
-    char* out = (char*)malloc(la + lb + 1);
+    size_t aligned_size = (total_len + 8) & ~7u;
+
+    // Fast-path: allocate from Thread-Local String Slab (Zero-Cost bump pointer, 0 OS malloc calls)
+    if (!g_tl_str_slab) {
+        g_tl_str_slab = (char*)malloc(APS_STR_SLAB_SIZE);
+        g_tl_str_slab_used = 0;
+    }
+    if (g_tl_str_slab && (g_tl_str_slab_used + aligned_size <= APS_STR_SLAB_SIZE)) {
+        char* out = g_tl_str_slab + g_tl_str_slab_used;
+        g_tl_str_slab_used += aligned_size;
+        memcpy(out, a, la);
+        memcpy(out + la, b, lb);
+        out[total_len] = '\0';
+        return out;
+    }
+
+    // Fallback: standard malloc if slab is full
+    char* out = (char*)malloc(total_len + 1);
     if (!out) aps_panic("out of memory in str_concat", "<runtime>", 0);
     memcpy(out, a, la);
     memcpy(out + la, b, lb);
-    out[la + lb] = '\0';
+    out[total_len] = '\0';
     return out;
 }
 
@@ -312,8 +342,6 @@ const char* aps_int_to_str(int64_t val) {
     snprintf(buf, 32, "%lld", (long long)val);
     return buf;
 }
-
-static int64_t g_aps_perf_freq = 0;
 
 static int64_t aps_get_perf_freq(void) {
 #ifdef _WIN32
