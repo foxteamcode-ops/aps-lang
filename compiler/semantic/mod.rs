@@ -821,6 +821,15 @@ impl SemanticAnalyzer {
                             }
                         }
                         return fn_sym.ret_type;
+                    } else if !name.contains("::") {
+                        self.diagnostics.push(
+                            Diagnostic::error(
+                                "E0102",
+                                format!("undefined function `{}`", name),
+                                expr.span.clone(),
+                            )
+                            .with_help("check the function name or define it with `fn`"),
+                        );
                     }
                 }
                 let _ = callee_name.take();

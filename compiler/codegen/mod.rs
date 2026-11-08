@@ -3,7 +3,7 @@ use crate::compiler::hir::HirStruct;
 use crate::compiler::ir::{ApsIrFunction, ApsIrModule};
 use crate::compiler::types::Type;
 use crate::runtime::APS_RUNTIME_C_SOURCE;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -90,6 +90,14 @@ impl LlvmBackend {
     }
 
     fn is_struct_all_copy(&self, sname: &str) -> bool {
+        let mut visited = HashSet::new();
+        self.is_struct_all_copy_visited(sname, &mut visited)
+    }
+
+    fn is_struct_all_copy_visited<'a>(&'a self, sname: &'a str, visited: &mut HashSet<&'a str>) -> bool {
+        if !visited.insert(sname) {
+            return false; // Break cyclic/recursive definition
+        }
         if let Some(fields) = self.structs.get(sname) {
             if fields.is_empty() {
                 return true;
@@ -109,7 +117,7 @@ impl LlvmBackend {
                 | Type::F64
                 | Type::Bool
                 | Type::Char => true,
-                Type::Struct(nested_name, _) => self.is_struct_all_copy(nested_name),
+                Type::Struct(nested_name, _) => self.is_struct_all_copy_visited(nested_name, visited),
                 _ => false,
             })
         } else {

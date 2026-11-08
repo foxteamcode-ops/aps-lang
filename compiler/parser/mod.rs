@@ -475,7 +475,12 @@ impl Parser {
         let generics = self.parse_generics();
         self.expect(&TokenKind::LBrace, "`{`");
         let mut fields = Vec::new();
-        while !self.is_eof() && !self.eat(&TokenKind::RBrace) {
+        let mut closed = false;
+        while !self.is_eof() {
+            if self.eat(&TokenKind::RBrace) {
+                closed = true;
+                break;
+            }
             let f_span = self.span();
             let f_pub = self.eat(&TokenKind::Pub);
             let (f_name, _) = self.expect_ident("field name");
@@ -488,6 +493,9 @@ impl Parser {
                 ty: f_ty,
                 span: f_span,
             });
+        }
+        if !closed {
+            self.expect(&TokenKind::RBrace, "`}`");
         }
         StructDecl {
             is_pub,
@@ -505,7 +513,12 @@ impl Parser {
         let generics = self.parse_generics();
         self.expect(&TokenKind::LBrace, "`{`");
         let mut variants = Vec::new();
-        while !self.is_eof() && !self.eat(&TokenKind::RBrace) {
+        let mut closed = false;
+        while !self.is_eof() {
+            if self.eat(&TokenKind::RBrace) {
+                closed = true;
+                break;
+            }
             let v_span = self.span();
             let (v_name, _) = self.expect_ident("enum variant name");
             let kind = if self.eat(&TokenKind::LParen) {
@@ -545,6 +558,9 @@ impl Parser {
                 span: v_span,
             });
         }
+        if !closed {
+            self.expect(&TokenKind::RBrace, "`}`");
+        }
         EnumDecl {
             is_pub,
             name,
@@ -568,7 +584,12 @@ impl Parser {
         };
         self.expect(&TokenKind::LBrace, "`{`");
         let mut methods = Vec::new();
-        while !self.is_eof() && !self.eat(&TokenKind::RBrace) {
+        let mut closed = false;
+        while !self.is_eof() {
+            if self.eat(&TokenKind::RBrace) {
+                closed = true;
+                break;
+            }
             let _ = self.parse_attributes();
             let is_pub = self.eat(&TokenKind::Pub);
             let is_async = self.eat(&TokenKind::Async);
@@ -578,6 +599,9 @@ impl Parser {
             } else {
                 self.advance();
             }
+        }
+        if !closed {
+            self.expect(&TokenKind::RBrace, "`}`");
         }
         ImplBlock {
             generics,
@@ -594,7 +618,12 @@ impl Parser {
         let generics = self.parse_generics();
         self.expect(&TokenKind::LBrace, "`{`");
         let mut methods = Vec::new();
-        while !self.is_eof() && !self.eat(&TokenKind::RBrace) {
+        let mut closed = false;
+        while !self.is_eof() {
+            if self.eat(&TokenKind::RBrace) {
+                closed = true;
+                break;
+            }
             let m_span = self.expect(&TokenKind::Fn, "`fn`");
             let (m_name, _) = self.expect_ident("trait method name");
             let m_gen = self.parse_generics();
@@ -615,6 +644,9 @@ impl Parser {
                 ret_type,
                 span: m_span,
             });
+        }
+        if !closed {
+            self.expect(&TokenKind::RBrace, "`}`");
         }
         TraitDecl {
             is_pub,
@@ -658,7 +690,12 @@ impl Parser {
         }
         self.expect(&TokenKind::LBrace, "`{`");
         let mut functions = Vec::new();
-        while !self.is_eof() && !self.eat(&TokenKind::RBrace) {
+        let mut closed = false;
+        while !self.is_eof() {
+            if self.eat(&TokenKind::RBrace) {
+                closed = true;
+                break;
+            }
             let _ = self.eat(&TokenKind::Pub);
             let m_span = self.expect(&TokenKind::Fn, "`fn`");
             let (m_name, _) = self.expect_ident("extern function name");
@@ -677,6 +714,9 @@ impl Parser {
                 ret_type,
                 span: m_span,
             });
+        }
+        if !closed {
+            self.expect(&TokenKind::RBrace, "`}`");
         }
         ExternBlock {
             abi,
@@ -709,10 +749,18 @@ impl Parser {
         let span = self.expect(&TokenKind::LBrace, "`{`");
         let mut stmts = Vec::new();
         self.eat_optional_semi();
-        while !self.is_eof() && !self.eat(&TokenKind::RBrace) {
+        let mut closed = false;
+        while !self.is_eof() {
+            if self.eat(&TokenKind::RBrace) {
+                closed = true;
+                break;
+            }
             let stmt = self.parse_stmt();
             stmts.push(stmt);
             self.eat_optional_semi();
+        }
+        if !closed {
+            self.expect(&TokenKind::RBrace, "`}`");
         }
         Block { stmts, span }
     }
