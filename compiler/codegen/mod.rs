@@ -21,6 +21,8 @@ pub struct LlvmBackend {
     ir_header: String,
     ir_globals: String,
     ir_functions: String,
+    entry_allocas: String,
+    current_fn_body: Option<Block>,
     string_pool: Vec<String>,
     string_map: HashMap<String, (usize, usize)>, // content -> (id, byte_len_with_null)
     structs: HashMap<String, Vec<(String, Type)>>,
@@ -41,6 +43,8 @@ impl LlvmBackend {
             ir_header: String::new(),
             ir_globals: String::new(),
             ir_functions: String::new(),
+            entry_allocas: String::new(),
+            current_fn_body: None,
             string_pool: Vec::new(),
             string_map: HashMap::new(),
             structs: HashMap::new(),
@@ -76,6 +80,154 @@ impl LlvmBackend {
         let l = format!("{}_{}", prefix, self.label_counter);
         self.label_counter += 1;
         l
+    }
+
+    fn emit_alloca(&mut self, llvm_ty: &str) -> String {
+        let slot = self.next_reg();
+        self.entry_allocas
+            .push_str(&format!("  {} = alloca {}, align 8\n", slot, llvm_ty));
+        slot
+    }
+
+    fn is_struct_all_copy(&self, sname: &str) -> bool {
+        if let Some(fields) = self.structs.get(sname) {
+            if fields.is_empty() {
+                return true;
+            }
+            fields.iter().all(|(_, fty)| match fty.strip_region() {
+                Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::Isize
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+                | Type::Usize
+                | Type::F32
+                | Type::F64
+                | Type::Bool
+                | Type::Char => true,
+                Type::Struct(nested_name, _) => self.is_struct_all_copy(nested_name),
+                _ => false,
+            })
+        } else {
+            false
+        }
+    }
+
+    fn expr_has_bare_ident(expr: &Expr, var: &str) -> bool {
+        match &expr.kind {
+            ExprKind::Ident(name) => name == var,
+            ExprKind::FieldAccess { base, .. } => {
+                if let ExprKind::Ident(bname) = &base.kind {
+                    if bname == var {
+                        return false;
+                    }
+                }
+                Self::expr_has_bare_ident(base, var)
+            }
+            ExprKind::Unary { expr: inner, .. } => Self::expr_has_bare_ident(inner, var),
+            ExprKind::Binary { left, right, .. } => {
+                Self::expr_has_bare_ident(left, var) || Self::expr_has_bare_ident(right, var)
+            }
+            ExprKind::Cast { expr: inner, .. } => Self::expr_has_bare_ident(inner, var),
+            ExprKind::Call { callee, args } => {
+                Self::expr_has_bare_ident(callee, var)
+                    || args.iter().any(|a| Self::expr_has_bare_ident(&a.expr, var))
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                Self::expr_has_bare_ident(receiver, var)
+                    || args.iter().any(|a| Self::expr_has_bare_ident(&a.expr, var))
+            }
+            ExprKind::Index { base, index } => {
+                Self::expr_has_bare_ident(base, var) || Self::expr_has_bare_ident(index, var)
+            }
+            ExprKind::StructInit { fields, .. } => {
+                fields.iter().any(|(_, e)| Self::expr_has_bare_ident(e, var))
+            }
+            ExprKind::ArrayLit(elems) => elems.iter().any(|e| Self::expr_has_bare_ident(e, var)),
+            ExprKind::Range { start, end, .. } => {
+                Self::expr_has_bare_ident(start, var) || Self::expr_has_bare_ident(end, var)
+            }
+            ExprKind::If {
+                cond,
+                then_block,
+                else_branch,
+            } => {
+                Self::expr_has_bare_ident(cond, var)
+                    || Self::block_has_bare_ident(then_block, var)
+                    || else_branch
+                        .as_ref()
+                        .map_or(false, |b| Self::expr_has_bare_ident(b, var))
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                Self::expr_has_bare_ident(scrutinee, var)
+                    || arms.iter().any(|arm| Self::block_has_bare_ident(&arm.body, var))
+            }
+            ExprKind::Block(b) => Self::block_has_bare_ident(b, var),
+            ExprKind::TryProp(inner) => Self::expr_has_bare_ident(inner, var),
+            _ => false,
+        }
+    }
+
+    fn block_has_bare_ident(block: &Block, var: &str) -> bool {
+        for stmt in &block.stmts {
+            match stmt {
+                Stmt::Let { init, .. } | Stmt::Var { init, .. } => {
+                    if Self::expr_has_bare_ident(init, var) {
+                        return true;
+                    }
+                }
+                Stmt::Const(c) => {
+                    if Self::expr_has_bare_ident(&c.value, var) {
+                        return true;
+                    }
+                }
+                Stmt::Assign { target, value, .. } => {
+                    if Self::expr_has_bare_ident(target, var) || Self::expr_has_bare_ident(value, var) {
+                        return true;
+                    }
+                }
+                Stmt::Return { value, .. } => {
+                    if let Some(v) = value {
+                        if Self::expr_has_bare_ident(v, var) {
+                            return true;
+                        }
+                    }
+                }
+                Stmt::Defer { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Unsafe { body, .. }
+                | Stmt::Loop { body, .. } => {
+                    if Self::block_has_bare_ident(body, var) {
+                        return true;
+                    }
+                }
+                Stmt::While { cond, body, .. } => {
+                    if Self::expr_has_bare_ident(cond, var) || Self::block_has_bare_ident(body, var) {
+                        return true;
+                    }
+                }
+                Stmt::For { iter, body, .. } => {
+                    if Self::expr_has_bare_ident(iter, var) || Self::block_has_bare_ident(body, var) {
+                        return true;
+                    }
+                }
+                Stmt::Expr { expr, .. } => {
+                    if Self::expr_has_bare_ident(expr, var) {
+                        return true;
+                    }
+                }
+                Stmt::Break { .. } | Stmt::Continue { .. } => {}
+            }
+        }
+        false
+    }
+
+    fn var_escapes_fn(&self, var: &str, body: &Block) -> bool {
+        Self::block_has_bare_ident(body, var)
     }
 
     fn intern_string(&mut self, s: &str) -> String {
@@ -258,7 +410,9 @@ declare void @aps_tcp_close(i64)
         module_consts: &[(String, Type, Expr)],
     ) -> String {
         self.reg_counter = 0;
-        let mut out = String::new();
+        self.entry_allocas.clear();
+        self.current_fn_body = Some(f.body.clone());
+        let mut fn_body = String::new();
         let is_main = f.name == "main";
         let ret_llvm = if is_main {
             "i32"
@@ -289,23 +443,14 @@ declare void @aps_tcp_close(i64)
             ""
         };
 
-        out.push_str(&format!(
-            "define dso_local {} @{}({}){} {{\nentry:\n",
-            ret_llvm,
-            Self::sanitize_ident(&f.name),
-            param_sigs.join(", "),
-            inline_attr
-        ));
-
         let mut locals: HashMap<String, LocalVar> = HashMap::new();
 
         // Seed module constants
         for (cname, cty, cexpr) in module_consts {
-            let (cval, actual_ty) = self.emit_expr(cexpr, &mut out, &mut locals, Some(cty));
-            let slot = self.next_reg();
+            let (cval, actual_ty) = self.emit_expr(cexpr, &mut fn_body, &mut locals, Some(cty));
             let lty = Self::llvm_val_type(&actual_ty);
-            out.push_str(&format!("  {} = alloca {}, align 8\n", slot, lty));
-            out.push_str(&format!("  store {} {}, ptr {}, align 8\n", lty, cval, slot));
+            let slot = self.emit_alloca(lty);
+            fn_body.push_str(&format!("  store {} {}, ptr {}, align 8\n", lty, cval, slot));
             locals.insert(
                 cname.clone(),
                 LocalVar {
@@ -329,10 +474,9 @@ declare void @aps_tcp_close(i64)
                     },
                 );
             } else {
-                let slot = self.next_reg();
                 let lty = Self::llvm_val_type(pty);
-                out.push_str(&format!("  {} = alloca {}, align 8\n", slot, lty));
-                out.push_str(&format!(
+                let slot = self.emit_alloca(lty);
+                fn_body.push_str(&format!(
                     "  store {} %arg.{}, ptr {}, align 8\n",
                     lty, pname, slot
                 ));
@@ -351,7 +495,7 @@ declare void @aps_tcp_close(i64)
         let mut loop_stack: Vec<(String, String)> = Vec::new();
         let (last_val, last_ty, did_return) = self.emit_block(
             &f.body,
-            &mut out,
+            &mut fn_body,
             &mut locals,
             &mut defer_stack,
             &mut loop_stack,
@@ -365,7 +509,7 @@ declare void @aps_tcp_close(i64)
                 let mut empty_defers = Vec::new();
                 let _ = self.emit_block(
                     dblk,
-                    &mut out,
+                    &mut fn_body,
                     &mut locals,
                     &mut empty_defers,
                     &mut loop_stack,
@@ -374,32 +518,43 @@ declare void @aps_tcp_close(i64)
                 );
             }
             if is_main {
-                out.push_str("  ret i32 0\n");
+                fn_body.push_str("  ret i32 0\n");
             } else if f.ret_type == Type::Void || f.ret_type == Type::Never {
-                out.push_str("  ret void\n");
+                fn_body.push_str("  ret void\n");
             } else {
                 let rty = Self::llvm_val_type(&f.ret_type);
                 if let Some(v) = last_val {
                     if Self::llvm_val_type(&last_ty) == rty {
-                        out.push_str(&format!("  ret {} {}\n", rty, v));
+                        fn_body.push_str(&format!("  ret {} {}\n", rty, v));
                     } else if rty == "ptr" {
-                        out.push_str("  ret ptr null\n");
+                        fn_body.push_str("  ret ptr null\n");
                     } else if rty == "double" {
-                        out.push_str("  ret double 0.0\n");
+                        fn_body.push_str("  ret double 0.0\n");
                     } else {
-                        out.push_str("  ret i64 0\n");
+                        fn_body.push_str("  ret i64 0\n");
                     }
                 } else if rty == "ptr" {
-                    out.push_str("  ret ptr null\n");
+                    fn_body.push_str("  ret ptr null\n");
                 } else if rty == "double" {
-                    out.push_str("  ret double 0.0\n");
+                    fn_body.push_str("  ret double 0.0\n");
                 } else {
-                    out.push_str("  ret i64 0\n");
+                    fn_body.push_str("  ret i64 0\n");
                 }
             }
         }
 
+        let mut out = String::new();
+        out.push_str(&format!(
+            "define dso_local {} @{}({}){} {{\nentry:\n",
+            ret_llvm,
+            Self::sanitize_ident(&f.name),
+            param_sigs.join(", "),
+            inline_attr
+        ));
+        out.push_str(&self.entry_allocas);
+        out.push_str(&fn_body);
         out.push_str("}\n");
+        self.current_fn_body = None;
         out
     }
 
@@ -425,22 +580,67 @@ declare void @aps_tcp_close(i64)
             let is_last = idx + 1 == block.stmts.len();
             match stmt {
                 Stmt::Let { name, ty, init, .. } | Stmt::Var { name, ty, init, .. } => {
-                    let expected = self.resolve_basic_type_ast(ty);
-                    let (val, inferred_ty) =
-                        self.emit_expr(init, out, locals, expected.as_ref());
-                    let final_ty = expected.unwrap_or(inferred_ty);
-                    let lty = Self::llvm_val_type(&final_ty);
-                    let slot = self.next_reg();
-                    out.push_str(&format!("  {} = alloca {}, align 8\n", slot, lty));
-                    out.push_str(&format!("  store {} {}, ptr {}, align 8\n", lty, val, slot));
-                    locals.insert(
-                        name.clone(),
-                        LocalVar {
-                            alloca_reg: slot,
-                            ty: final_ty,
-                            is_write_ref: false,
-                        },
-                    );
+                    let is_stack_struct = if let ExprKind::StructInit { name: sname, .. } = &init.kind {
+                        let is_copy = self.is_struct_all_copy(sname);
+                        let escapes = if let Some(ref b) = self.current_fn_body {
+                            self.var_escapes_fn(name, b)
+                        } else {
+                            true
+                        };
+                        is_copy && !escapes
+                    } else {
+                        false
+                    };
+
+                    if is_stack_struct {
+                        if let ExprKind::StructInit { name: sname, fields } = &init.kind {
+                            let sptr = self.emit_alloca(&format!("%struct.{}", sname));
+                            let sfields = self.structs.get(sname).cloned().unwrap_or_default();
+                            for (fname, fexpr) in fields {
+                                if let Some((idx, (_, fty))) =
+                                    sfields.iter().enumerate().find(|(_, (n, _))| n == fname)
+                                {
+                                    let (fval, _) = self.emit_expr(fexpr, out, locals, Some(fty));
+                                    let gep = self.next_reg();
+                                    out.push_str(&format!(
+                                        "  {} = getelementptr inbounds %struct.{}, ptr {}, i32 0, i32 {}\n",
+                                        gep, sname, sptr, idx
+                                    ));
+                                    let flty = Self::llvm_val_type(fty);
+                                    out.push_str(&format!(
+                                        "  store {} {}, ptr {}, align 8\n",
+                                        flty, fval, gep
+                                    ));
+                                }
+                            }
+                            let slot = self.emit_alloca("ptr");
+                            out.push_str(&format!("  store ptr {}, ptr {}, align 8\n", sptr, slot));
+                            locals.insert(
+                                name.clone(),
+                                LocalVar {
+                                    alloca_reg: slot,
+                                    ty: Type::Struct(sname.clone(), Vec::new()),
+                                    is_write_ref: false,
+                                },
+                            );
+                        }
+                    } else {
+                        let expected = self.resolve_basic_type_ast(ty);
+                        let (val, inferred_ty) =
+                            self.emit_expr(init, out, locals, expected.as_ref());
+                        let final_ty = expected.unwrap_or(inferred_ty);
+                        let lty = Self::llvm_val_type(&final_ty);
+                        let slot = self.emit_alloca(lty);
+                        out.push_str(&format!("  store {} {}, ptr {}, align 8\n", lty, val, slot));
+                        locals.insert(
+                            name.clone(),
+                            LocalVar {
+                                alloca_reg: slot,
+                                ty: final_ty,
+                                is_write_ref: false,
+                            },
+                        );
+                    }
                 }
                 Stmt::Const(c) => {
                     let expected = self.resolve_basic_type_ast(&c.ty);
@@ -448,8 +648,7 @@ declare void @aps_tcp_close(i64)
                         self.emit_expr(&c.value, out, locals, expected.as_ref());
                     let final_ty = expected.unwrap_or(inferred_ty);
                     let lty = Self::llvm_val_type(&final_ty);
-                    let slot = self.next_reg();
-                    out.push_str(&format!("  {} = alloca {}, align 8\n", slot, lty));
+                    let slot = self.emit_alloca(lty);
                     out.push_str(&format!("  store {} {}, ptr {}, align 8\n", lty, val, slot));
                     locals.insert(
                         c.name.clone(),
@@ -475,8 +674,7 @@ declare void @aps_tcp_close(i64)
                         "  {} = call ptr @aps_region_begin(ptr {}, i64 65536)\n",
                         reg_ptr, rname_global
                     ));
-                    let slot = self.next_reg();
-                    out.push_str(&format!("  {} = alloca ptr, align 8\n", slot));
+                    let slot = self.emit_alloca("ptr");
                     out.push_str(&format!("  store ptr {}, ptr {}, align 8\n", reg_ptr, slot));
                     locals.insert(
                         name.clone(),
@@ -633,8 +831,7 @@ declare void @aps_tcp_close(i64)
                         Type::Array(e, _) | Type::Vec(e) => *e,
                         _ => Type::I64,
                     };
-                    let idx_slot = self.next_reg();
-                    out.push_str(&format!("  {} = alloca i64, align 8\n", idx_slot));
+                    let idx_slot = self.emit_alloca("i64");
                     out.push_str(&format!("  store i64 0, ptr {}, align 8\n", idx_slot));
 
                     let len_ptr = self.next_reg();
@@ -684,8 +881,7 @@ declare void @aps_tcp_close(i64)
                         elem_val, elem_llvm, elem_ptr
                     ));
 
-                    let var_slot = self.next_reg();
-                    out.push_str(&format!("  {} = alloca {}, align 8\n", var_slot, elem_llvm));
+                    let var_slot = self.emit_alloca(elem_llvm);
                     out.push_str(&format!(
                         "  store {} {}, ptr {}, align 8\n",
                         elem_llvm, elem_val, var_slot
@@ -1443,12 +1639,13 @@ declare void @aps_tcp_close(i64)
                 let else_lbl = self.next_label("if_else");
                 let merge_lbl = self.next_label("if_merge");
 
-                let res_slot = self.next_reg();
                 let res_ty = expected_ty.cloned().unwrap_or(Type::I64);
                 let res_llvm = Self::llvm_val_type(&res_ty);
-                if res_llvm != "void" {
-                    out.push_str(&format!("  {} = alloca {}, align 8\n", res_slot, res_llvm));
-                }
+                let res_slot = if res_llvm != "void" {
+                    self.emit_alloca(res_llvm)
+                } else {
+                    self.next_reg()
+                };
 
                 out.push_str(&format!(
                     "  br i1 {}, label %{}, label %{}\n",
@@ -1536,17 +1733,19 @@ declare void @aps_tcp_close(i64)
                 let merge_lbl = self.next_label("match_end");
                 let res_ty = expected_ty.cloned().unwrap_or(Type::I64);
                 let res_llvm = Self::llvm_val_type(&res_ty);
-                let res_slot = self.next_reg();
-                if res_llvm != "void" {
-                    out.push_str(&format!("  {} = alloca {}, align 8\n", res_slot, res_llvm));
+                let res_slot = if res_llvm != "void" {
+                    let slot = self.emit_alloca(res_llvm);
                     if res_llvm == "ptr" {
-                        out.push_str(&format!("  store ptr null, ptr {}, align 8\n", res_slot));
+                        out.push_str(&format!("  store ptr null, ptr {}, align 8\n", slot));
                     } else if res_llvm == "double" {
-                        out.push_str(&format!("  store double 0.0, ptr {}, align 8\n", res_slot));
+                        out.push_str(&format!("  store double 0.0, ptr {}, align 8\n", slot));
                     } else {
-                        out.push_str(&format!("  store i64 0, ptr {}, align 8\n", res_slot));
+                        out.push_str(&format!("  store i64 0, ptr {}, align 8\n", slot));
                     }
-                }
+                    slot
+                } else {
+                    self.next_reg()
+                };
 
                 let is_enum_ptr = Self::llvm_val_type(&scrut_ty) == "ptr";
                 let tag_val = if is_enum_ptr {
@@ -1628,8 +1827,7 @@ declare void @aps_tcp_close(i64)
                                     "  {} = load i64, ptr {}, align 8\n",
                                     pv, pp
                                 ));
-                                let bslot = self.next_reg();
-                                out.push_str(&format!("  {} = alloca i64, align 8\n", bslot));
+                                let bslot = self.emit_alloca("i64");
                                 out.push_str(&format!(
                                     "  store i64 {}, ptr {}, align 8\n",
                                     pv, bslot
@@ -1645,9 +1843,8 @@ declare void @aps_tcp_close(i64)
                             }
                         }
                     } else if let Pattern::Ident(bname) = &arm.pattern {
-                        let bslot = self.next_reg();
                         let slty = Self::llvm_val_type(&scrut_ty);
-                        out.push_str(&format!("  {} = alloca {}, align 8\n", bslot, slty));
+                        let bslot = self.emit_alloca(slty);
                         out.push_str(&format!(
                             "  store {} {}, ptr {}, align 8\n",
                             slty, scrut_val, bslot
