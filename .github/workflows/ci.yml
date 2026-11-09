@@ -33,8 +33,11 @@ jobs:
       - name: Run Rust unit & AMA memory safety integration tests
         run: cargo test --all-targets
 
-      - name: Verify all 32 Specification Examples
-        run: cargo run --bin aps -- test examples/specification
+      - name: Verify all 36 Specification Examples (Native Execution)
+        run: cargo run --bin aps -- test examples/specification --run
+
+      - name: Run Native Benchmark Smoke Test
+        run: cargo run --bin aps -- bench benchmarks/01_cpu_collatz_primes.aps
 
       - name: Verify APS Standard Library (17 modules)
         run: cargo run --bin aps -- test std

@@ -1,0 +1,70 @@
+name: Release APS Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release-build:
+    name: Build Release Asset (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin_name: aps.exe
+            archive_name: aps-windows-x64.zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin_name: aps
+            archive_name: aps-linux-x64.tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bin_name: aps
+            archive_name: aps-macos-arm64.tar.gz
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build APS Compiler in Release Mode
+        run: cargo build --release
+
+      - name: Package Windows Binary
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          mkdir release_dist
+          Copy-Item target/release/aps.exe release_dist/
+          Copy-Item target/release/apm.exe release_dist/ -ErrorAction SilentlyContinue
+          Copy-Item target/release/aps-lsp.exe release_dist/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse runtime release_dist/
+          Copy-Item -Recurse std release_dist/
+          Copy-Item LICENSE release_dist/
+          Copy-Item README.md release_dist/
+          Compress-Archive -Path release_dist/* -DestinationPath ${{ matrix.archive_name }}
+
+      - name: Package Unix Binary
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          mkdir release_dist
+          cp target/release/aps release_dist/
+          cp target/release/apm release_dist/ || true
+          cp target/release/aps-lsp release_dist/ || true
+          cp -r runtime release_dist/
+          cp -r std release_dist/
+          cp LICENSE README.md release_dist/
+          tar -czf ${{ matrix.archive_name }} -C release_dist .
+
+      - name: Upload Binary to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.archive_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
