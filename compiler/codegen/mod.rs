@@ -547,6 +547,8 @@ declare i64 @aps_str_ends_with(ptr, ptr) readonly willreturn nounwind
 declare i64 @aps_str_eq(ptr, ptr) readonly willreturn nounwind
 declare noalias ptr @aps_str_concat(ptr, ptr) willreturn
 declare ptr @aps_int_to_str(i64) willreturn
+declare ptr @aps_float_to_str(double) willreturn
+declare ptr @aps_bool_to_str(i64) willreturn
 declare i64 @aps_time_now_ms()
 declare i64 @aps_time_now_ns()
 declare void @aps_sleep_ms(i64)
@@ -581,6 +583,11 @@ declare i64 @aps_simd_max_i64(ptr, i64)
 declare i64 @aps_simd_find_byte(ptr, i64, i64)
 declare i64 @aps_simd_count_byte(ptr, i64, i64)
 declare i64 @aps_simd_is_ascii(ptr, i64)
+declare void @aps_simd_f64x4_add(ptr, ptr, ptr)
+declare void @aps_simd_f64x4_mul(ptr, ptr, ptr)
+declare void @aps_simd_i64x4_add(ptr, ptr, ptr)
+declare void @aps_simd_i64x4_mul(ptr, ptr, ptr)
+declare ptr @aps_region_cast_view(ptr, ptr, i64, i64)
 declare ptr @aps_str_slice(ptr, i64, i64)
 declare i64 @aps_str_find(ptr, ptr)
 declare i64 @aps_str_find_byte(ptr, i64)
@@ -2010,9 +2017,33 @@ declare ptr @aps_tcp_stream_flush(i64)
                     let res = self.next_reg();
                     match op {
                         BinOp::Add => {
+                            let mut actual_lv = lv;
+                            if !matches!(lty, Type::String | Type::Str) {
+                                let conv = self.next_reg();
+                                if matches!(lty, Type::F32 | Type::F64) {
+                                    out.push_str(&format!("  {} = call ptr @aps_float_to_str(double {})\n", conv, actual_lv));
+                                } else if lty == Type::Bool {
+                                    out.push_str(&format!("  {} = call ptr @aps_bool_to_str(i64 {})\n", conv, actual_lv));
+                                } else {
+                                    out.push_str(&format!("  {} = call ptr @aps_int_to_str(i64 {})\n", conv, actual_lv));
+                                }
+                                actual_lv = conv;
+                            }
+                            let mut actual_rv = rv;
+                            if !matches!(rty, Type::String | Type::Str) {
+                                let conv = self.next_reg();
+                                if matches!(rty, Type::F32 | Type::F64) {
+                                    out.push_str(&format!("  {} = call ptr @aps_float_to_str(double {})\n", conv, actual_rv));
+                                } else if rty == Type::Bool {
+                                    out.push_str(&format!("  {} = call ptr @aps_bool_to_str(i64 {})\n", conv, actual_rv));
+                                } else {
+                                    out.push_str(&format!("  {} = call ptr @aps_int_to_str(i64 {})\n", conv, actual_rv));
+                                }
+                                actual_rv = conv;
+                            }
                             out.push_str(&format!(
                                 "  {} = call ptr @aps_str_concat(ptr {}, ptr {})\n",
-                                res, lv, rv
+                                res, actual_lv, actual_rv
                             ));
                             return (res, Type::String);
                         }
@@ -2714,11 +2745,36 @@ declare ptr @aps_tcp_stream_flush(i64)
             ExprKind::TryProp(inner) => {
                 let (enum_ptr, inner_ty) = self.emit_expr(inner, out, locals, None);
                 let is_ptr = Self::llvm_val_type(&inner_ty) == "ptr";
-                let ok_ty = match inner_ty {
+                let ok_ty = match inner_ty.clone() {
                     Type::Result(ok, _) | Type::Option(ok) => *ok,
                     other => other,
                 };
                 if is_ptr {
+                    let tag_p = self.next_reg();
+                    out.push_str(&format!(
+                        "  {} = getelementptr inbounds %aps.Enum, ptr {}, i32 0, i32 0\n",
+                        tag_p, enum_ptr
+                    ));
+                    let tag_v = self.next_reg();
+                    out.push_str(&format!("  {} = load i64, ptr {}, align 8\n", tag_v, tag_p));
+                    let is_ok = self.next_reg();
+                    let ok_lbl = self.next_label("try_ok");
+                    let err_lbl = self.next_label("try_err");
+                    out.push_str(&format!("  {} = icmp eq i64 {}, 1\n", is_ok, tag_v));
+                    out.push_str(&format!(
+                        "  br i1 {}, label %{}, label %{}, !prof !1\n",
+                        is_ok, ok_lbl, err_lbl
+                    ));
+                    out.push_str(&format!("{}:\n", err_lbl));
+                    let cur_ret_llvm = Self::llvm_val_type(&self.current_fn_ret_type);
+                    if cur_ret_llvm == "ptr" {
+                        out.push_str(&format!("  ret ptr {}\n", enum_ptr));
+                    } else if cur_ret_llvm == "void" {
+                        out.push_str("  ret void\n");
+                    } else {
+                        out.push_str(&format!("  ret {} 0\n", cur_ret_llvm));
+                    }
+                    out.push_str(&format!("{}:\n", ok_lbl));
                     let pay_p = self.next_reg();
                     out.push_str(&format!(
                         "  {} = getelementptr inbounds %aps.Enum, ptr {}, i32 0, i32 1\n",

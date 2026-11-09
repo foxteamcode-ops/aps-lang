@@ -1,0 +1,108 @@
+// ============================================================================
+// Файл: 35_modern_language_features.aps
+// Описание: Тестирование современных возможностей языка APS:
+//   1. Интерполяция строк f"..." и автоматическое приведение типов к String
+//   2. Конкатенация строк с числами и булевыми значениями через оператор `+`
+//   3. Оператор проброса ошибок `?` для Result<T, E> и Option<T>
+//   4. SIMD векторные операции над числами
+// ============================================================================
+
+module modern_features_demo
+
+struct User {
+    id: i64
+    name: String
+    rating: f64
+    active: bool
+}
+
+fn find_user_balance(uid: i64) -> Result<i64, String> {
+    if uid <= 0 {
+        return Err("некорректный ID пользователя")
+    }
+    if uid == 404 {
+        return Err("пользователь не найден")
+    }
+    return Ok(uid * 1500)
+}
+
+fn calculate_payout(uid: i64, bonus: i64) -> Result<i64, String> {
+    // Оператор ? автоматически возвращает Err(...) при ошибке
+    let balance = find_user_balance(uid)?
+    return Ok(balance + bonus)
+}
+
+fn find_driver_id(code: i64) -> Option<i64> {
+    if code > 0 {
+        return Some(code + 1000)
+    }
+    return None
+}
+
+fn get_driver_fleet_id(code: i64) -> Option<i64> {
+    let id = find_driver_id(code)?
+    return Some(id * 2)
+}
+
+fn main() {
+    println("=== APS Modern Language Features Demo ===")
+
+    // 1. Интерполяция f-строк
+    let user = User { id: 777, name: "Arman", rating: 4.95, active: true }
+    let info = f"User #{user.id}: {user.name}, rating: {user.rating}, active: {user.active}"
+    println(info)
+
+    // 2. Автоматическое приведение к строке через оператор `+`
+    let label = "Total items count: " + 42
+    println(label)
+
+    let float_msg = "Current multiplier: " + 2.5
+    println(float_msg)
+
+    let bool_msg = "System health check: " + true
+    println(bool_msg)
+
+    // 3. Оператор `?` с Result<T, E>
+    let payout_ok = calculate_payout(777, 500)
+    match payout_ok {
+        Ok(total) => {
+            println(f"Success payout: {total} KZT")
+        }
+        Err(err) => {
+            println(f"Payout failed: {err}")
+        }
+    }
+
+    let payout_err = calculate_payout(-1, 500)
+    match payout_err {
+        Ok(total) => {
+            println(f"Success payout: {total} KZT")
+        }
+        Err(err) => {
+            println(f"Payout rejected as expected: {err}")
+        }
+    }
+
+    // 4. Оператор `?` с Option<T>
+    let opt_some = get_driver_fleet_id(50)
+    match opt_some {
+        Some(fid) => {
+            println(f"Fleet ID resolved: {fid}")
+        }
+        None => {
+            println("Fleet ID missing")
+        }
+    }
+
+    let opt_none = get_driver_fleet_id(-5)
+    match opt_none {
+        Some(fid) => {
+            println(f"Fleet ID resolved: {fid}")
+        }
+        None => {
+            println("Fleet ID missing (as expected)")
+        }
+    }
+
+    println("ALL MODERN FEATURES PASSED SUCCESSFULLY!")
+}

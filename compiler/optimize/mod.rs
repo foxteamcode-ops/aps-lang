@@ -99,9 +99,7 @@ impl Optimizer {
 
     fn expr_has_control_flow(expr: &Expr) -> bool {
         match &expr.kind {
-            ExprKind::Match { arms, .. } => {
-                arms.iter().any(|arm| Self::block_has_control_flow(&arm.body))
-            }
+            ExprKind::Match { .. } => true,
             ExprKind::Block(b) => Self::block_has_control_flow(b),
             ExprKind::If {
                 cond,

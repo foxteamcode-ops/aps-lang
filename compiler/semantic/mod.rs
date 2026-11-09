@@ -769,6 +769,12 @@ impl SemanticAnalyzer {
                         Type::Bool
                     }
                     BinOp::And | BinOp::Or => Type::Bool,
+                    BinOp::Add
+                        if matches!(lt.strip_region(), Type::String | Type::Str)
+                            || matches!(rt.strip_region(), Type::String | Type::Str) =>
+                    {
+                        Type::String
+                    }
                     _ => {
                         if !lt.is_compatible_with(&rt) {
                             self.diagnostics.push(

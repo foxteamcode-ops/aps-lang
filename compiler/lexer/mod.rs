@@ -6,6 +6,7 @@ pub enum TokenKind {
     IntLit(i64, Option<String>),
     FloatLit(f64, Option<String>),
     StringLit(String),
+    FormatString(String),
     CharLit(char),
     BoolLit(bool),
     Ident(String),
@@ -255,6 +256,19 @@ impl<'a> Lexer<'a> {
             let preceded_by_newline = saw_newline;
             saw_newline = false;
 
+            // Format string literal f"..."
+            if (ch == 'f' || ch == 'F') && self.peek_next() == Some('"') {
+                self.advance(); // consume 'f'
+                let kind = self.lex_fstring(start_line, start_col, start_byte);
+                let end_byte = self.current_byte_pos();
+                tokens.push(Token {
+                    kind,
+                    span: Span::new(&self.file, start_line, start_col, start_byte, end_byte),
+                    preceded_by_newline,
+                });
+                continue;
+            }
+
             // String literal
             if ch == '"' {
                 let kind = self.lex_string(start_line, start_col, start_byte);
@@ -370,6 +384,50 @@ impl<'a> Lexer<'a> {
         }
 
         TokenKind::StringLit(s)
+    }
+
+    fn lex_fstring(&mut self, start_line: usize, start_col: usize, start_byte: usize) -> TokenKind {
+        self.advance(); // opening '"'
+        let mut s = String::new();
+        let mut closed = false;
+
+        while let Some(c) = self.advance() {
+            match c {
+                '"' => {
+                    closed = true;
+                    break;
+                }
+                '\\' => match self.advance() {
+                    Some('n') => s.push('\n'),
+                    Some('r') => s.push('\r'),
+                    Some('t') => s.push('\t'),
+                    Some('\\') => s.push('\\'),
+                    Some('"') => s.push('"'),
+                    Some('0') => s.push('\0'),
+                    Some('{') => s.push('{'),
+                    Some('}') => s.push('}'),
+                    Some(escaped) => s.push(escaped),
+                    None => break,
+                },
+                other => s.push(other),
+            }
+        }
+
+        if !closed {
+            let span = Span::new(
+                &self.file,
+                start_line,
+                start_col,
+                start_byte,
+                self.current_byte_pos(),
+            );
+            self.diagnostics.push(
+                Diagnostic::error("E0003", "unterminated format string literal", span)
+                    .with_help("add a closing double quote `\"`"),
+            );
+        }
+
+        TokenKind::FormatString(s)
     }
 
     fn lex_char(&mut self, start_line: usize, start_col: usize, start_byte: usize) -> TokenKind {

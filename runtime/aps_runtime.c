@@ -645,6 +645,21 @@ void* aps_int_to_str(int64_t val) {
     return (void*)res;
 }
 
+void* aps_float_to_str(double val) {
+    char* buf = (char*)aps_alloc(32);
+    int len = snprintf(buf, 32, "%.6g", val);
+    ApsStr* res = (ApsStr*)aps_alloc(sizeof(ApsStr));
+    res->data = buf;
+    res->len = len > 0 ? len : 0;
+    return (void*)res;
+}
+
+void* aps_bool_to_str(int64_t val) {
+    static ApsStr s_true = { "true", 4 };
+    static ApsStr s_false = { "false", 5 };
+    return (void*)(val ? &s_true : &s_false);
+}
+
 static int64_t aps_get_perf_freq(void) {
 #ifdef _WIN32
     if (g_aps_perf_freq <= 0) {
@@ -1603,6 +1618,59 @@ int64_t aps_simd_find_byte(const void* data_ptr, int64_t len, int64_t byte_val) 
     const uint8_t* p = (const uint8_t*)memchr(data, (int)(byte_val & 0xFF), (size_t)len);
     if (!p) return -1;
     return (int64_t)(p - data);
+}
+
+typedef struct {
+    double v0, v1, v2, v3;
+} ApsF64x4;
+
+typedef struct {
+    int64_t v0, v1, v2, v3;
+} ApsI64x4;
+
+void aps_simd_f64x4_add(ApsF64x4* out, const ApsF64x4* a, const ApsF64x4* b) {
+    if (!out || !a || !b) return;
+    out->v0 = a->v0 + b->v0;
+    out->v1 = a->v1 + b->v1;
+    out->v2 = a->v2 + b->v2;
+    out->v3 = a->v3 + b->v3;
+}
+
+void aps_simd_f64x4_mul(ApsF64x4* out, const ApsF64x4* a, const ApsF64x4* b) {
+    if (!out || !a || !b) return;
+    out->v0 = a->v0 * b->v0;
+    out->v1 = a->v1 * b->v1;
+    out->v2 = a->v2 * b->v2;
+    out->v3 = a->v3 * b->v3;
+}
+
+void aps_simd_i64x4_add(ApsI64x4* out, const ApsI64x4* a, const ApsI64x4* b) {
+    if (!out || !a || !b) return;
+    out->v0 = a->v0 + b->v0;
+    out->v1 = a->v1 + b->v1;
+    out->v2 = a->v2 + b->v2;
+    out->v3 = a->v3 + b->v3;
+}
+
+void aps_simd_i64x4_mul(ApsI64x4* out, const ApsI64x4* a, const ApsI64x4* b) {
+    if (!out || !a || !b) return;
+    out->v0 = a->v0 * b->v0;
+    out->v1 = a->v1 * b->v1;
+    out->v2 = a->v2 * b->v2;
+    out->v3 = a->v3 * b->v3;
+}
+
+void* aps_region_cast_view(void* region_ptr, const void* raw_data, int64_t offset, int64_t expected_size) {
+    if (!raw_data || offset < 0 || expected_size <= 0) return NULL;
+    const char* bytes = (const char*)raw_data + offset;
+    if (((uintptr_t)bytes & 7) == 0) {
+        return (void*)bytes;
+    }
+    void* dst = aps_region_alloc(region_ptr, expected_size);
+    if (dst) {
+        memcpy(dst, bytes, (size_t)expected_size);
+    }
+    return dst;
 }
 
 void* aps_str_slice(const void* s_ptr, int64_t start, int64_t len) {

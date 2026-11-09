@@ -1,6 +1,6 @@
 use crate::compiler::ast::*;
 use crate::compiler::diagnostics::{Diagnostic, DiagnosticBag, Span};
-use crate::compiler::lexer::{Token, TokenKind};
+use crate::compiler::lexer::{Lexer, Token, TokenKind};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -1207,6 +1207,91 @@ impl Parser {
         }
     }
 
+    fn parse_format_string(&mut self, raw: &str, span: Span) -> Expr {
+        let mut parts: Vec<Expr> = Vec::new();
+        let mut chars = raw.chars().peekable();
+        let mut current_lit = String::new();
+
+        while let Some(c) = chars.next() {
+            if c == '{' {
+                if !current_lit.is_empty() {
+                    parts.push(Expr {
+                        kind: ExprKind::StringLit(std::mem::take(&mut current_lit)),
+                        span: span.clone(),
+                    });
+                }
+                let mut expr_str = String::new();
+                let mut depth = 1;
+                while let Some(inner_c) = chars.next() {
+                    if inner_c == '{' {
+                        depth += 1;
+                        expr_str.push(inner_c);
+                    } else if inner_c == '}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                        expr_str.push(inner_c);
+                    } else {
+                        expr_str.push(inner_c);
+                    }
+                }
+                let trimmed = expr_str.trim();
+                if !trimmed.is_empty() {
+                    let mut sub_lexer = Lexer::new(&span.file, trimmed);
+                    let sub_tokens = sub_lexer.tokenize();
+                    let mut sub_parser = Parser::new(sub_tokens);
+                    let sub_expr = sub_parser.parse_expr();
+                    parts.push(sub_expr);
+                }
+            } else {
+                current_lit.push(c);
+            }
+        }
+
+        if !current_lit.is_empty() {
+            parts.push(Expr {
+                kind: ExprKind::StringLit(current_lit),
+                span: span.clone(),
+            });
+        }
+
+        if parts.is_empty() {
+            return Expr {
+                kind: ExprKind::StringLit(String::new()),
+                span,
+            };
+        }
+
+        let mut iter = parts.into_iter();
+        let mut res = iter.next().unwrap();
+        let first_is_string = matches!(res.kind, ExprKind::StringLit(_));
+        if !first_is_string {
+            res = Expr {
+                kind: ExprKind::Binary {
+                    op: BinOp::Add,
+                    left: Box::new(Expr {
+                        kind: ExprKind::StringLit(String::new()),
+                        span: span.clone(),
+                    }),
+                    right: Box::new(res),
+                },
+                span: span.clone(),
+            };
+        }
+        for next_part in iter {
+            res = Expr {
+                kind: ExprKind::Binary {
+                    op: BinOp::Add,
+                    left: Box::new(res),
+                    right: Box::new(next_part),
+                },
+                span: span.clone(),
+            };
+        }
+        res
+    }
+
     fn parse_primary_expr(&mut self) -> Expr {
         let span = self.span();
         match self.peek_kind().clone() {
@@ -1230,6 +1315,10 @@ impl Parser {
                     kind: ExprKind::StringLit(s),
                     span,
                 }
+            }
+            TokenKind::FormatString(s) => {
+                self.advance();
+                self.parse_format_string(&s, span)
             }
             TokenKind::CharLit(c) => {
                 self.advance();
@@ -1505,6 +1594,7 @@ impl Parser {
             TokenKind::IntLit(_, _)
             | TokenKind::FloatLit(_, _)
             | TokenKind::StringLit(_)
+            | TokenKind::FormatString(_)
             | TokenKind::BoolLit(_)
             | TokenKind::CharLit(_)
             | TokenKind::Minus => {
