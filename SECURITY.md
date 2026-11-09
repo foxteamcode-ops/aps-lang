@@ -8,10 +8,10 @@ The APS project takes software security seriously. As a systems programming lang
 
 Only the latest release version on the `master` branch receives active security updates:
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| Version     | Supported          |
+| ----------- | ------------------ |
+| 0.1.x-alpha | :white_check_mark: |
+| < 0.1       | :x:                |
 
 ---
 
@@ -21,7 +21,7 @@ If you discover a security vulnerability (such as a memory safety bypass, unexpe
 
 1. **Do NOT report security vulnerabilities via public GitHub issues.**
 2. Send an email with a detailed description, minimal reproducible `.aps` source code, and environment details to:
-   **security@aps-lang.org** (or open a private GitHub Security Advisory).
+   **foxteamcode@gmail.com** (or open a private GitHub Security Advisory).
 3. Include the compiler commit hash (`aps --version`) and operating system.
 
 ### What to Expect:

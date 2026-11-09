@@ -12,7 +12,7 @@ A clear and concise description of what the bug is.
 **APS Version**
 Output of `aps --version`:
 ```bash
-aps 1.0.0 (Advanced Performance Systems Compiler, AMA Memory Engine, LLVM Backend)
+aps 0.1.0-alpha (Advanced Performance Systems Compiler, AMA Memory Engine, LLVM Backend)
 ```
 
 **Environment**

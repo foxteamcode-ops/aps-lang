@@ -29,7 +29,7 @@ impl ApsLanguageServer {
 
         if msg.contains("\"method\":\"initialize\"") {
             return Some(format!(
-                r#"{{"jsonrpc":"2.0","id":{},"result":{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"completionProvider":{{"resolveProvider":false,"triggerCharacters":[".",":"]}},"definitionProvider":true}},"serverInfo":{{"name":"aps-lsp","version":"1.0.0"}}}}}}"#,
+                r#"{{"jsonrpc":"2.0","id":{},"result":{{"capabilities":{{"textDocumentSync":1,"hoverProvider":true,"completionProvider":{{"resolveProvider":false,"triggerCharacters":[".",":"]}},"definitionProvider":true}},"serverInfo":{{"name":"aps-lsp","version":"0.1.0-alpha"}}}}}}"#,
                 req_id
             ));
         }

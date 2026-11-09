@@ -1,8 +1,8 @@
 [package]
 name = "aps"
-version = "1.0.0"
+version = "0.1.0-alpha"
 edition = "2021"
-authors = ["APS Compiler Engineering Team"]
+authors = ["APS Language Team <foxteamcode@gmail.com>"]
 description = "APS (Advanced Performance Systems) Programming Language Compiler, AMA Memory Analyzer, LLVM Backend, Package Manager (apm), and LSP Server"
 license = "MIT"
 repository = "https://github.com/foxteamcode-ops/aps-lang"

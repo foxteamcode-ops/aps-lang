@@ -5,6 +5,7 @@
 
 **A next-generation compiled systems language engineered for raw C speed, zero-cost memory safety without a garbage collector, and modern developer ergonomics.**
 
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha%20(v0.1.0--alpha)-orange.svg)](#)
 [![CI/CD Status](https://github.com/foxteamcode-ops/aps-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/foxteamcode-ops/aps-lang/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![LLVM Backend](https://img.shields.io/badge/Backend-LLVM%2018%2B-orange.svg)](https://llvm.org/)
@@ -23,6 +24,20 @@
 ---
 
 </div>
+
+> [!WARNING]
+> ### ⚠️ Alpha Release Notice (`v0.1.0-alpha`)
+> **APS is currently in an active Alpha stage of development.**
+> The compiler, standard library, and runtime are under rapid development. **Expect experimental features, potential bugs, syntax iterations, and breaking changes.**
+>
+> We encourage testing, benchmarking, and experimentation, but **production use is not recommended yet**.
+> If you encounter a bug, crash, or unexpected behavior, please [open an issue](https://github.com/foxteamcode-ops/aps-lang/issues) or reach out directly!
+>
+> 📬 **Maintainer / Creator Contact:** [foxteamcode@gmail.com](mailto:foxteamcode@gmail.com)  
+> 🐛 **Issue Tracker:** [GitHub Issues](https://github.com/foxteamcode-ops/aps-lang/issues)  
+> 🌟 **GitHub Repository:** [foxteamcode-ops/aps-lang](https://github.com/foxteamcode-ops/aps-lang)
+
+---
 
 ## 💡 Why APS?
 
@@ -240,13 +255,14 @@ apm                       # Advanced Package Manager for APS libraries
 
 ---
 
-## 🤝 Contributing
+## 🤝 Contributing & Community
 
 We welcome contributions from developers worldwide! Whether it's reporting bugs, optimizing codegen, improving the standard library, or adding documentation:
 
 1. Check out our [Contributing Guide](CONTRIBUTING.md) for environment setup and coding standards.
 2. Review our [Roadmap](ROADMAP.md) to see what's planned.
-3. Submit a Pull Request or open an Issue.
+3. Submit a Pull Request or open an [Issue](https://github.com/foxteamcode-ops/aps-lang/issues).
+4. Direct questions and feedback: [foxteamcode@gmail.com](mailto:foxteamcode@gmail.com).
 
 ---
 
@@ -255,5 +271,6 @@ We welcome contributions from developers worldwide! Whether it's reporting bugs,
 APS is licensed under the [MIT License](LICENSE). You are free to use it for personal, open-source, or commercial production projects.
 
 <div align="center">
-<b>Built with obsession for performance, correctness, and simplicity.</b>
+<b>Built with obsession for performance, correctness, and simplicity.</b><br>
+<sub>Lead Maintainer: <a href="mailto:foxteamcode@gmail.com">foxteamcode@gmail.com</a> | <a href="https://github.com/foxteamcode-ops/aps-lang">GitHub Repository</a></sub>
 </div>
