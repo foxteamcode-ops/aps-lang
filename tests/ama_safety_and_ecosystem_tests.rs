@@ -645,3 +645,52 @@ fn main() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("FIXES_VERIFIED_OK"));
 }
+
+#[test]
+fn test_native_windows_gui_framework_pipeline() {
+    let src = r#"
+fn on_click() {
+    println("CLICKED")
+}
+
+fn main() {
+    let win = gui_window_create("Test GUI", 300, 200)
+    assert(win != 0)
+    let btn = gui_add_button(win, "Click Me", 10, 10, 100, 30, on_click)
+    assert(btn >= 100)
+    let lbl = gui_add_label(win, "Label 1", 10, 50, 100, 20)
+    assert(lbl >= 100)
+    let inp = gui_add_input(win, "Default Text", 10, 80, 100, 25)
+    assert(inp >= 100)
+    let initial = gui_widget_get_text(win, inp)
+    assert(initial == "Default Text")
+    gui_widget_set_text(win, inp, "New Text")
+    let updated = gui_widget_get_text(win, inp)
+    assert(updated == "New Text")
+    let conf = gui_confirm("Test", "Confirm?")
+    assert(conf)
+    gui_window_close(win)
+    println("GUI_TEST_PASSED")
+}
+"#;
+    let res = check_code(src);
+    assert!(!res.diagnostics.has_errors());
+
+    let out_dir = PathBuf::from("target/test_artifacts");
+    let _ = fs::create_dir_all(&out_dir);
+    let exe_path = out_dir.join(if cfg!(windows) {
+        "gui_test_binary.exe"
+    } else {
+        "gui_test_binary"
+    });
+    let pipeline = CompilerPipeline::new(2);
+    pipeline
+        .build_executable("gui_test_binary.aps", src, &exe_path)
+        .expect("should compile gui test binary");
+    let mut cmd = Command::new(&exe_path);
+    cmd.env("APS_GUI_HEADLESS", "1");
+    let output = cmd.output().expect("should execute gui test binary");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("GUI_TEST_PASSED"));
+}

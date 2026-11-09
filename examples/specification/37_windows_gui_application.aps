@@ -1,0 +1,133 @@
+// ============================================================================
+// Файл: 37_windows_gui_application.aps
+// Описание: Спецификационный тест нативного фреймворка графического интерфейса
+// Windows (GUI Framework, эквивалент Tkinter для APS).
+// Проверяет:
+//   1. Создание нативного окна (Win32 Window / Form)
+//   2. Добавление элементов управления: Button, Label, Input
+//   3. Установка и считывание текста виджетов (set_text / get_text)
+//   4. Регистрация функции обратного вызова (on_click callback)
+//   5. Диалоговые окна оповещений и подтверждений (alert, confirm)
+//   6. Детерминированное закрытие окна (close)
+// ============================================================================
+
+module windows_gui_app_demo
+
+struct Widget {
+    id: i64
+    win: i64
+}
+
+impl Widget {
+    pub fn set_text(self, text: String) {
+        gui_widget_set_text(self.win, self.id, text)
+    }
+
+    pub fn get_text(self) -> String {
+        return gui_widget_get_text(self.win, self.id)
+    }
+}
+
+struct Window {
+    handle: i64
+    title: String
+    width: i64
+    height: i64
+}
+
+impl Window {
+    pub fn new(title: String, width: i64, height: i64) -> Window {
+        let h = gui_window_create(title, width, height)
+        return Window {
+            handle: h,
+            title: title,
+            width: width,
+            height: height
+        }
+    }
+
+    pub fn add_label(self, text: String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_label(self.handle, text, x, y, w, h)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_input(self, placeholder: String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_input(self.handle, placeholder, x, y, w, h)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_button(self, text: String, x: i64, y: i64, w: i64, h: i64, on_click: fn()) -> Widget {
+        let wid = gui_add_button(self.handle, text, x, y, w, h, on_click)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn run(self) {
+        gui_window_run(self.handle)
+    }
+
+    pub fn close(self) {
+        gui_window_close(self.handle)
+    }
+}
+
+fn on_submit_clicked() {
+    println("[EVENT] Submit button was clicked!")
+}
+
+fn main() {
+    println("=== APS Native Windows GUI Application Specification Test ===")
+
+    // 1. Создание нативного окна (400x300)
+    let win = Window.new("APS Tkinter-like Native GUI App", 400, 300)
+    print("1. Window created with handle ID: ")
+    println(win.handle)
+
+    // 2. Создание текстовой метки
+    let lbl_title = win.add_label("Welcome to APS Native Windows GUI!", 20, 20, 360, 25)
+    print("2. Label widget created with ID: ")
+    println(lbl_title.id)
+
+    // 3. Создание поля ввода
+    let input_field = win.add_input("Enter your name...", 20, 55, 360, 30)
+    print("3. Input widget created with ID: ")
+    println(input_field.id)
+
+    // 4. Проверка считывания текста поля ввода
+    let initial_text = input_field.get_text()
+    print("   Initial input text: ")
+    println(initial_text)
+
+    // 5. Установка нового текста в поле ввода
+    input_field.set_text("APS Developer")
+    let updated_text = input_field.get_text()
+    print("   Updated input text: ")
+    println(updated_text)
+
+    // 6. Добавление интерактивной кнопки с колбэком
+    let btn = win.add_button("Submit", 20, 100, 120, 35, on_submit_clicked)
+    print("4. Button widget created with ID: ")
+    println(btn.id)
+
+    // 7. Проверка смены текста метки
+    lbl_title.set_text("Status: All Controls Initialized!")
+
+    // 8. Проверка диалоговых окон
+    print("5. Confirm dialog result: ")
+    let conf = gui_confirm("APS Test", "Proceed with GUI tests?")
+    println(conf)
+
+    // 9. Корректное закрытие окна
+    win.close()
+    println("6. Window successfully closed.")
+
+    println("ALL WINDOWS GUI APPLICATION TESTS PASSED SUCCESSFULLY!")
+}

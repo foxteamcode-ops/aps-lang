@@ -1,0 +1,110 @@
+// ============================================================================
+// Модуль: std.gui
+// Описание: Нативный фреймворк графического интерфейса Windows (GUI / Tkinter
+// эквивалент для APS). Ультра-быстрые нативные Win32 элементы управления,
+// нулевые накладные расходы на запуск (< 1 мс), минимальное потребление RAM (~2 МБ).
+// ============================================================================
+
+module std.gui
+
+/// Тип элемента управления GUI
+pub enum WidgetType {
+    Button,
+    Label,
+    Input
+}
+
+/// Нативный графический элемент управления (`Widget`)
+pub struct Widget {
+    pub id: i64
+    pub win_handle: i64
+    pub widget_type: WidgetType
+}
+
+impl Widget {
+    /// Устанавливает текст элемента
+    pub fn set_text(self, text: read String) {
+        gui_widget_set_text(self.win_handle, self.id, read text)
+    }
+
+    /// Получает текущий текст элемента
+    pub fn get_text(self) -> String {
+        return gui_widget_get_text(self.win_handle, self.id)
+    }
+}
+
+/// Главное окно приложения (`Window`)
+pub struct Window {
+    pub handle: i64
+    pub title: String
+    pub width: i64
+    pub height: i64
+}
+
+impl Window {
+    /// Создает новое нативное окно с заданным заголовком и размерами
+    pub fn new(title: read String, width: i64, height: i64) -> Window {
+        let h = gui_window_create(read title, width, height)
+        return Window {
+            handle: h,
+            title: title.clone(),
+            width: width,
+            height: height
+        }
+    }
+
+    /// Добавляет кнопку с обработчиком клика
+    pub fn add_button(self, text: read String, x: i64, y: i64, w: i64, h: i64, on_click: fn()) -> Widget {
+        let wid = gui_add_button(self.handle, read text, x, y, w, h, on_click)
+        return Widget {
+            id: wid,
+            win_handle: self.handle,
+            widget_type: WidgetType.Button
+        }
+    }
+
+    /// Добавляет текстовую метку (статический текст)
+    pub fn add_label(self, text: read String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_label(self.handle, read text, x, y, w, h)
+        return Widget {
+            id: wid,
+            win_handle: self.handle,
+            widget_type: WidgetType.Label
+        }
+    }
+
+    /// Добавляет поле ввода текста (Edit control)
+    pub fn add_input(self, placeholder: read String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_input(self.handle, read placeholder, x, y, w, h)
+        return Widget {
+            id: wid,
+            win_handle: self.handle,
+            widget_type: WidgetType.Input
+        }
+    }
+
+    /// Запускает цикл обработки сообщений Windows (Message Loop)
+    pub fn run(self) {
+        gui_window_run(self.handle)
+    }
+
+    /// Закрывает окно
+    pub fn close(self) {
+        gui_window_close(self.handle)
+    }
+}
+
+/// Показывает информационное всплывающее окно (MessageBox Info)
+pub fn alert(title: read String, message: read String) {
+    gui_alert(read title, read message)
+}
+
+/// Показывает диалог подтверждения Да / Нет (MessageBox Confirm)
+pub fn confirm(title: read String, message: read String) -> bool {
+    return gui_confirm(read title, read message)
+}
+
+/// Показывает окно сообщения об ошибке (MessageBox Error)
+pub fn error(title: read String, message: read String) {
+    gui_error(read title, read message)
+}

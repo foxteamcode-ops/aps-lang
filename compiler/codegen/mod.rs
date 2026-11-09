@@ -613,6 +613,17 @@ declare ptr @aps_tcp_stream_connect(ptr, i64, i64)
 declare ptr @aps_tcp_stream_read_line(i64)
 declare ptr @aps_tcp_stream_write_str(i64, ptr)
 declare ptr @aps_tcp_stream_flush(i64)
+declare ptr @aps_gui_window_create(ptr, i64, i64)
+declare void @aps_gui_window_run(ptr)
+declare void @aps_gui_window_close(ptr)
+declare i64 @aps_gui_add_button(ptr, ptr, i64, i64, i64, i64, ptr)
+declare i64 @aps_gui_add_label(ptr, ptr, i64, i64, i64, i64)
+declare i64 @aps_gui_add_input(ptr, ptr, i64, i64, i64, i64)
+declare void @aps_gui_widget_set_text(ptr, i64, ptr)
+declare ptr @aps_gui_widget_get_text(ptr, i64)
+declare void @aps_gui_alert(ptr, ptr)
+declare i64 @aps_gui_confirm(ptr, ptr)
+declare void @aps_gui_error(ptr, ptr)
 
 ;Tagged union / Enum standard layout: { i64 tag, i64 payload0, i64 payload1 }
 %aps.Enum = type { i64, i64, i64 }
@@ -3344,6 +3355,136 @@ declare ptr @aps_tcp_stream_flush(i64)
                 return (r, Type::Struct("Response".to_string(), Vec::new()));
             }
         }
+        if fn_name == "gui_window_create" || fn_name == "aps_gui_window_create" {
+            if args.len() >= 3 {
+                let (title_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
+                let (w_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let r_ptr = self.next_reg();
+                out.push_str(&format!("  {} = call ptr @aps_gui_window_create(ptr {}, i64 {}, i64 {})\n", r_ptr, title_v, w_v, h_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = ptrtoint ptr {} to i64\n", r, r_ptr));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_window_run" || fn_name == "aps_gui_window_run" {
+            if let Some(first) = args.first() {
+                let (win_v, _) = self.emit_expr(&first.expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_window_run(ptr {})\n", win_ptr));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_window_close" || fn_name == "aps_gui_window_close" {
+            if let Some(first) = args.first() {
+                let (win_v, _) = self.emit_expr(&first.expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_window_close(ptr {})\n", win_ptr));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_add_button" || fn_name == "aps_gui_add_button" {
+            if args.len() >= 7 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (txt_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (x_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (y_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let (w_v, _) = self.emit_expr(&args[4].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[5].expr, out, locals, Some(&Type::I64));
+                let (fn_v, fn_ty) = self.emit_expr(&args[6].expr, out, locals, None);
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let fn_ptr = if fn_ty == Type::I64 {
+                    let p = self.next_reg();
+                    out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", p, fn_v));
+                    p
+                } else {
+                    fn_v
+                };
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_add_button(ptr {}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {}, ptr {})\n", r, win_ptr, txt_v, x_v, y_v, w_v, h_v, fn_ptr));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_add_label" || fn_name == "aps_gui_add_label" {
+            if args.len() >= 6 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (txt_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (x_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (y_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let (w_v, _) = self.emit_expr(&args[4].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[5].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_add_label(ptr {}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {})\n", r, win_ptr, txt_v, x_v, y_v, w_v, h_v));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_add_input" || fn_name == "aps_gui_add_input" {
+            if args.len() >= 6 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (txt_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (x_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (y_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let (w_v, _) = self.emit_expr(&args[4].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[5].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_add_input(ptr {}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {})\n", r, win_ptr, txt_v, x_v, y_v, w_v, h_v));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_widget_set_text" || fn_name == "aps_gui_widget_set_text" {
+            if args.len() >= 3 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let (txt_v, _) = self.emit_expr(&args[2].expr, out, locals, None);
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_widget_set_text(ptr {}, i64 {}, ptr {})\n", win_ptr, id_v, txt_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_widget_get_text" || fn_name == "aps_gui_widget_get_text" {
+            if args.len() >= 2 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call ptr @aps_gui_widget_get_text(ptr {}, i64 {})\n", r, win_ptr, id_v));
+                return (r, Type::String);
+            }
+        }
+        if fn_name == "gui_alert" || fn_name == "aps_gui_alert" {
+            if args.len() >= 2 {
+                let (t_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
+                let (m_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                out.push_str(&format!("  call void @aps_gui_alert(ptr {}, ptr {})\n", t_v, m_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_confirm" || fn_name == "aps_gui_confirm" {
+            if args.len() >= 2 {
+                let (t_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
+                let (m_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_confirm(ptr {}, ptr {})\n", r, t_v, m_v));
+                return (r, Type::Bool);
+            }
+        }
+        if fn_name == "gui_error" || fn_name == "aps_gui_error" {
+            if args.len() >= 2 {
+                let (t_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
+                let (m_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                out.push_str(&format!("  call void @aps_gui_error(ptr {}, ptr {})\n", t_v, m_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
         if fn_name == "likely" {
             if let Some(first) = args.first() {
                 let (v, _) = self.emit_expr(&first.expr, out, locals, Some(&Type::Bool));
@@ -4472,7 +4613,10 @@ declare ptr @aps_tcp_stream_flush(i64)
             .arg(&rt_obj_path);
 
         if cfg!(windows) {
-            cmd.arg("-lws2_32");
+            cmd.arg("-lws2_32")
+                .arg("-luser32")
+                .arg("-lgdi32")
+                .arg("-lcomctl32");
         }
 
         cmd.arg("-o")
