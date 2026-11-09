@@ -47,6 +47,8 @@ pub struct AmaAnalyzer {
     pub functions: HashMap<String, FnSymbol>,
     pub scopes: Vec<Vec<AmaVarBinding>>,
     pub active_regions: Vec<(String, usize)>, // (region_name, scope_depth)
+    pub loop_depth: usize,
+    pub loop_min_depth: usize,
     pub report: AmaReport,
     pub diagnostics: DiagnosticBag,
 }
@@ -58,6 +60,8 @@ impl AmaAnalyzer {
             functions,
             scopes: vec![Vec::new()],
             active_regions: Vec::new(),
+            loop_depth: 0,
+            loop_min_depth: 0,
             report: AmaReport::default(),
             diagnostics: DiagnosticBag::new(),
         }
@@ -218,7 +222,12 @@ impl AmaAnalyzer {
             }
             ExprKind::FieldAccess { base, .. } => self.infer_expr_region(base),
             ExprKind::Unary { expr: inner, .. } => self.infer_expr_region(inner),
-            ExprKind::Call { args, .. } => {
+            ExprKind::Call { callee, args } => {
+                if let ExprKind::Ident(ref name) = callee.kind {
+                    if name == "promote" {
+                        return None; // Explicit promotion clears the region tag, permitting escape to outer scopes
+                    }
+                }
                 for a in args {
                     if let Some(r) = self.infer_expr_region(&a.expr) {
                         return Some(r);
@@ -528,13 +537,31 @@ impl AmaAnalyzer {
                 self.active_regions.pop();
             }
             Stmt::Defer { body, .. }
-            | Stmt::Unsafe { body, .. }
-            | Stmt::Loop { body, .. } => {
+            | Stmt::Unsafe { body, .. } => {
                 self.analyze_block(body);
+            }
+            Stmt::Loop { body, .. } => {
+                let prev_depth = self.loop_depth;
+                let prev_min = self.loop_min_depth;
+                self.loop_depth += 1;
+                if prev_depth == 0 {
+                    self.loop_min_depth = self.current_depth();
+                }
+                self.analyze_block(body);
+                self.loop_depth = prev_depth;
+                self.loop_min_depth = prev_min;
             }
             Stmt::While { cond, body, .. } => {
                 self.check_expr(cond, Capability::Read);
+                let prev_depth = self.loop_depth;
+                let prev_min = self.loop_min_depth;
+                self.loop_depth += 1;
+                if prev_depth == 0 {
+                    self.loop_min_depth = self.current_depth();
+                }
                 self.analyze_block(body);
+                self.loop_depth = prev_depth;
+                self.loop_min_depth = prev_min;
             }
             Stmt::For {
                 var,
@@ -543,6 +570,12 @@ impl AmaAnalyzer {
                 span,
             } => {
                 self.check_expr(iter, Capability::Read);
+                let prev_depth = self.loop_depth;
+                let prev_min = self.loop_min_depth;
+                self.loop_depth += 1;
+                if prev_depth == 0 {
+                    self.loop_min_depth = self.current_depth();
+                }
                 self.push_scope();
                 let depth = self.current_depth();
                 self.declare_var(AmaVarBinding {
@@ -561,6 +594,8 @@ impl AmaAnalyzer {
                     self.analyze_stmt(s);
                 }
                 self.pop_scope();
+                self.loop_depth = prev_depth;
+                self.loop_min_depth = prev_min;
             }
             Stmt::Break { .. } | Stmt::Continue { .. } => {}
             Stmt::Expr { expr, .. } => {
@@ -649,6 +684,22 @@ impl AmaAnalyzer {
                             "change parameter `{}` to `take` if ownership transfer is intended",
                             root
                         )),
+                    );
+                    return;
+                }
+
+                if self.loop_depth > 0
+                    && binding.scope_depth <= self.loop_min_depth
+                    && !binding.ty.is_copy()
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "E0204",
+                            format!("cannot move out of variable `{}` in a loop", root),
+                            span.clone(),
+                        )
+                        .with_label("move occurs here in a loop")
+                        .with_help("borrow instead with `read`/`write` or clone the value before moving"),
                     );
                     return;
                 }
@@ -891,18 +942,95 @@ impl AmaAnalyzer {
             ExprKind::If {
                 cond,
                 then_block,
-                else_branch,
+                else_branch: None,
             } => {
                 self.check_expr(cond, Capability::Read);
                 self.analyze_block(then_block);
-                if let Some(eb) = else_branch {
-                    self.check_expr(eb, Capability::Read);
+            }
+            ExprKind::If {
+                cond,
+                then_block,
+                else_branch: Some(eb),
+            } => {
+                self.check_expr(cond, Capability::Read);
+                let snapshot_before = self.scopes.clone();
+                self.analyze_block(then_block);
+                let snapshot_then = self.scopes.clone();
+
+                self.scopes = snapshot_before;
+                self.check_expr(eb, Capability::Read);
+                let snapshot_else = self.scopes.clone();
+
+                for (depth, scope) in self.scopes.iter_mut().enumerate() {
+                    for var in scope.iter_mut() {
+                        let moved_in_then = snapshot_then
+                            .get(depth)
+                            .and_then(|sc| sc.iter().find(|v| v.name == var.name))
+                            .map(|v| matches!(v.state, OwnershipState::Moved { .. }))
+                            .unwrap_or(false);
+                        let moved_in_else = snapshot_else
+                            .get(depth)
+                            .and_then(|sc| sc.iter().find(|v| v.name == var.name))
+                            .map(|v| matches!(v.state, OwnershipState::Moved { .. }))
+                            .unwrap_or(false);
+
+                        if moved_in_then || moved_in_else {
+                            let moved_span = snapshot_then
+                                .get(depth)
+                                .and_then(|sc| sc.iter().find(|v| v.name == var.name))
+                                .and_then(|v| match &v.state {
+                                    OwnershipState::Moved { moved_at } => Some(moved_at.clone()),
+                                    _ => None,
+                                })
+                                .or_else(|| {
+                                    snapshot_else
+                                        .get(depth)
+                                        .and_then(|sc| sc.iter().find(|v| v.name == var.name))
+                                        .and_then(|v| match &v.state {
+                                            OwnershipState::Moved { moved_at } => Some(moved_at.clone()),
+                                            _ => None,
+                                        })
+                                })
+                                .unwrap_or_else(|| var.decl_span.clone());
+                            var.state = OwnershipState::Moved { moved_at: moved_span };
+                        }
+                    }
                 }
             }
             ExprKind::Match { scrutinee, arms } => {
                 self.check_expr(scrutinee, Capability::Read);
+                let snapshot_before = self.scopes.clone();
+                let mut arm_snapshots = Vec::new();
                 for arm in arms {
+                    self.scopes = snapshot_before.clone();
                     self.analyze_block(&arm.body);
+                    arm_snapshots.push(self.scopes.clone());
+                }
+                if !arm_snapshots.is_empty() {
+                    for (depth, scope) in self.scopes.iter_mut().enumerate() {
+                        for var in scope.iter_mut() {
+                            let moved_in_any = arm_snapshots.iter().any(|snap| {
+                                snap.get(depth)
+                                    .and_then(|sc| sc.iter().find(|v| v.name == var.name))
+                                    .map(|v| matches!(v.state, OwnershipState::Moved { .. }))
+                                    .unwrap_or(false)
+                            });
+                            if moved_in_any {
+                                let moved_span = arm_snapshots
+                                    .iter()
+                                    .find_map(|snap| {
+                                        snap.get(depth)
+                                            .and_then(|sc| sc.iter().find(|v| v.name == var.name))
+                                            .and_then(|v| match &v.state {
+                                                OwnershipState::Moved { moved_at } => Some(moved_at.clone()),
+                                                _ => None,
+                                            })
+                                    })
+                                    .unwrap_or_else(|| var.decl_span.clone());
+                                var.state = OwnershipState::Moved { moved_at: moved_span };
+                            }
+                        }
+                    }
                 }
             }
             ExprKind::Closure { body, .. } | ExprKind::Block(body) => {

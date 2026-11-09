@@ -26,10 +26,50 @@ pub fn format_aps_source(source: &str) -> String {
         formatted.push_str(clean_line);
         formatted.push('\n');
 
-        // Adjust indent for next line based on net braces outside strings/comments
-        let code_part = trimmed.split("//").next().unwrap_or(trimmed);
-        let opens = code_part.chars().filter(|c| *c == '{').count();
-        let closes = code_part.chars().filter(|c| *c == '}').count();
+        // Count braces outside string literals, char literals, and // comments
+        let mut in_str = false;
+        let mut in_char = false;
+        let mut escaped = false;
+        let mut opens = 0usize;
+        let mut closes = 0usize;
+
+        let chars: Vec<char> = trimmed.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if escaped {
+                escaped = false;
+                i += 1;
+                continue;
+            }
+            if c == '\\' && (in_str || in_char) {
+                escaped = true;
+                i += 1;
+                continue;
+            }
+            if c == '"' && !in_char {
+                in_str = !in_str;
+                i += 1;
+                continue;
+            }
+            if c == '\'' && !in_str {
+                in_char = !in_char;
+                i += 1;
+                continue;
+            }
+            if !in_str && !in_char {
+                if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                    break;
+                }
+                if c == '{' {
+                    opens += 1;
+                } else if c == '}' {
+                    closes += 1;
+                }
+            }
+            i += 1;
+        }
+
         let leading_close = usize::from(trimmed.starts_with('}'));
 
         if opens > closes.saturating_sub(leading_close) {

@@ -410,3 +410,184 @@ fn main() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("attempt to divide by zero"));
 }
+
+#[test]
+fn test_traits_and_contract_enforcement() {
+    let invalid_src = r#"
+trait Describable {
+    fn describe(self: read Self) -> String
+}
+
+struct Item {
+    id: i64
+}
+
+impl Describable for Item {
+}
+
+fn main() {
+}
+"#;
+    let res = check_code(invalid_src);
+    assert!(res.diagnostics.has_errors());
+    assert!(res.diagnostics.diagnostics.iter().any(|d| d.code == "E0110"));
+
+    let valid_src = r#"
+trait Describable {
+    fn describe(self: read Self) -> String
+}
+
+struct Item {
+    id: i64
+}
+
+impl Describable for Item {
+    fn describe(self: read Item) -> String {
+        return "item"
+    }
+}
+
+fn main() {
+    let it = Item { id: 42 }
+    let desc = it.describe()
+    println(desc)
+}
+"#;
+    let valid_res = check_code(valid_src);
+    assert!(!valid_res.diagnostics.has_errors());
+
+    let out_dir = PathBuf::from("target/test_artifacts");
+    let _ = fs::create_dir_all(&out_dir);
+    let exe_path = out_dir.join(if cfg!(windows) {
+        "trait_test.exe"
+    } else {
+        "trait_test"
+    });
+    let pipeline = CompilerPipeline::new(2);
+    pipeline
+        .build_executable("trait_test.aps", valid_src, &exe_path)
+        .expect("should compile trait binary");
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("should execute trait binary");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("item"));
+}
+
+#[test]
+fn test_extreme_performance_builtins_native_execution() {
+    let src = r#"
+fn main() {
+    let arr: [i64; 4] = [100, 200, 300, 400]
+    let s = simd_sum_i64(arr, 4)
+    let mn = simd_min_i64(arr, 4)
+    let mx = simd_max_i64(arr, 4)
+    assert(s == 1000)
+    assert(mn == 100)
+    assert(mx == 400)
+
+    let txt = "hello world\n"
+    assert(simd_is_ascii(txt, 12))
+    assert(simd_count_byte(txt, 12, 10) == 1)
+    assert(simd_find_byte(txt, 12, 32) == 5)
+
+    let part = str_slice("benchmark_turbo", 10, 5)
+    assert(part == "turbo")
+    assert(str_find("benchmark_turbo", "turbo") == 10)
+    assert(str_find_byte("benchmark_turbo", 95) == 9)
+    assert(str_view_eq(part, 5, "turbo", 5))
+
+    if likely(s == 1000) {
+        let resp = http_response_fast(200, "text/plain", "OK")
+        assert(str_find(resp, "200 OK") >= 0)
+    }
+    println("PERF_OK")
+}
+"#;
+    let res = check_code(src);
+    assert!(!res.diagnostics.has_errors());
+
+    let out_dir = PathBuf::from("target/test_artifacts");
+    let _ = fs::create_dir_all(&out_dir);
+    let exe_path = out_dir.join(if cfg!(windows) {
+        "extreme_perf_test.exe"
+    } else {
+        "extreme_perf_test"
+    });
+    let pipeline = CompilerPipeline::new(2);
+    pipeline
+        .build_executable("extreme_perf_test.aps", src, &exe_path)
+        .expect("should compile extreme perf binary");
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("should execute extreme perf binary");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PERF_OK"));
+}
+
+#[test]
+fn test_architectural_solutions_region_promotion_and_safety() {
+    // 1. Direct region escape is rejected by E0303 (Lifetime Lattice check)
+    let bad_src = r#"
+struct User {
+    id: i64
+}
+
+fn test_escape() -> i64 {
+    var global_user: User = User { id: 0 }
+    region request_arena {
+        let u = request_arena.alloc(User { id: 42 })
+        global_user = u
+    }
+    return global_user.id
+}
+"#;
+    let bad_res = check_code(bad_src);
+    assert!(bad_res.diagnostics.has_errors());
+    assert!(bad_res.diagnostics.diagnostics.iter().any(|d| d.code == "E0303"));
+
+    // 2. Safe explicit promotion out of region succeeds
+    let good_src = r#"
+struct User {
+    id: i64
+}
+
+fn test_promote() -> i64 {
+    var global_user: User = User { id: 0 }
+    region request_arena {
+        region_set_quota(request_arena, 1048576)
+        let u = request_arena.alloc(User { id: 42 })
+        global_user = promote(u)
+    }
+    return global_user.id
+}
+
+fn main() {
+    let uid = test_promote()
+    assert(uid == 42)
+    println("ARCH_SOLUTIONS_OK")
+}
+"#;
+    let good_res = check_code(good_src);
+    assert!(!good_res.diagnostics.has_errors());
+
+    let out_dir = PathBuf::from("target/test_artifacts");
+    let _ = fs::create_dir_all(&out_dir);
+    let exe_path = out_dir.join(if cfg!(windows) {
+        "arch_solutions_test.exe"
+    } else {
+        "arch_solutions_test"
+    });
+    let pipeline = CompilerPipeline::new(2);
+    pipeline
+        .build_executable("arch_solutions_test.aps", good_src, &exe_path)
+        .expect("should compile architectural solutions binary");
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("should execute architectural solutions binary");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ARCH_SOLUTIONS_OK"));
+}

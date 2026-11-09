@@ -268,6 +268,27 @@ pub enum Stmt {
     },
 }
 
+impl Stmt {
+    pub fn span(&self) -> &Span {
+        match self {
+            Stmt::Let { span, .. }
+            | Stmt::Var { span, .. }
+            | Stmt::Assign { span, .. }
+            | Stmt::Return { span, .. }
+            | Stmt::Break { span }
+            | Stmt::Continue { span }
+            | Stmt::Defer { span, .. }
+            | Stmt::Region { span, .. }
+            | Stmt::Unsafe { span, .. }
+            | Stmt::While { span, .. }
+            | Stmt::For { span, .. }
+            | Stmt::Loop { span, .. }
+            | Stmt::Expr { span, .. } => span,
+            Stmt::Const(c) => &c.span,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Add,

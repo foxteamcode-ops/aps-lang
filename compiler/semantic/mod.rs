@@ -33,6 +33,7 @@ pub struct SemanticAnalyzer {
     pub in_unsafe_block: bool,
     pub in_loop_depth: usize,
     pub active_regions: Vec<String>,
+    pub traits: HashMap<String, TraitDecl>,
     pub diagnostics: DiagnosticBag,
 }
 
@@ -48,6 +49,7 @@ impl SemanticAnalyzer {
             in_unsafe_block: false,
             in_loop_depth: 0,
             active_regions: Vec::new(),
+            traits: HashMap::new(),
             diagnostics: DiagnosticBag::new(),
         };
         sa.register_builtins();
@@ -84,11 +86,34 @@ impl SemanticAnalyzer {
             ("sleep_ms", vec![("ms", Capability::Value, Type::I64)], Type::Void),
             ("time_now_ms", vec![], Type::I64),
             ("time_now_ns", vec![], Type::I64),
+            ("aps_time_now_ms", vec![], Type::I64),
+            ("aps_time_now_ns", vec![], Type::I64),
             ("sha256_hex", vec![("data", Capability::Read, Type::String)], Type::String),
             ("random_i64", vec![("min", Capability::Value, Type::I64), ("max", Capability::Value, Type::I64)], Type::I64),
             ("fs_read_text", vec![("path", Capability::Read, Type::String)], Type::Result(Box::new(Type::String), Box::new(Type::String))),
             ("fs_write_text", vec![("path", Capability::Read, Type::String), ("content", Capability::Read, Type::String)], Type::Result(Box::new(Type::Void), Box::new(Type::String))),
             ("fs_exists", vec![("path", Capability::Read, Type::String)], Type::Bool),
+            ("async_sleep_ms", vec![("ms", Capability::Value, Type::I64)], Type::I64),
+            ("block_on", vec![("future", Capability::Value, Type::Unknown)], Type::Unknown),
+            ("channel", vec![("cap", Capability::Value, Type::I64)], Type::Channel(Box::new(Type::Unknown))),
+            ("spawn_thread", vec![("task", Capability::Value, Type::Unknown)], Type::Task(Box::new(Type::Unknown))),
+            ("clock_nanos", vec![], Type::I64),
+            ("simd_dot_f64", vec![("a", Capability::Read, Type::Unknown), ("b", Capability::Read, Type::Unknown), ("len", Capability::Value, Type::I64)], Type::F64),
+            ("simd_sum_i64", vec![("a", Capability::Read, Type::Unknown), ("len", Capability::Value, Type::I64)], Type::I64),
+            ("simd_min_i64", vec![("a", Capability::Read, Type::Unknown), ("len", Capability::Value, Type::I64)], Type::I64),
+            ("simd_max_i64", vec![("a", Capability::Read, Type::Unknown), ("len", Capability::Value, Type::I64)], Type::I64),
+            ("simd_find_byte", vec![("data", Capability::Read, Type::Unknown), ("len", Capability::Value, Type::I64), ("byte", Capability::Value, Type::I64)], Type::I64),
+            ("simd_count_byte", vec![("data", Capability::Read, Type::Unknown), ("len", Capability::Value, Type::I64), ("byte", Capability::Value, Type::I64)], Type::I64),
+            ("simd_is_ascii", vec![("data", Capability::Read, Type::Unknown), ("len", Capability::Value, Type::I64)], Type::Bool),
+            ("str_slice", vec![("s", Capability::Read, Type::String), ("start", Capability::Value, Type::I64), ("len", Capability::Value, Type::I64)], Type::String),
+            ("str_find", vec![("haystack", Capability::Read, Type::String), ("needle", Capability::Read, Type::String)], Type::I64),
+            ("str_find_byte", vec![("s", Capability::Read, Type::String), ("byte", Capability::Value, Type::I64)], Type::I64),
+            ("str_view_eq", vec![("a", Capability::Read, Type::String), ("a_len", Capability::Value, Type::I64), ("b", Capability::Read, Type::String), ("b_len", Capability::Value, Type::I64)], Type::Bool),
+            ("likely", vec![("cond", Capability::Value, Type::Bool)], Type::Bool),
+            ("unlikely", vec![("cond", Capability::Value, Type::Bool)], Type::Bool),
+            ("http_response_fast", vec![("status", Capability::Value, Type::I64), ("content_type", Capability::Read, Type::String), ("body", Capability::Read, Type::String)], Type::String),
+            ("promote", vec![("val", Capability::Read, Type::Unknown)], Type::Unknown),
+            ("region_set_quota", vec![("region", Capability::Read, Type::Unknown), ("max_bytes", Capability::Value, Type::I64)], Type::Void),
         ];
 
         for (name, params, ret) in builtins {
@@ -185,6 +210,9 @@ impl SemanticAnalyzer {
                     let (_, resolved) = self.tcx.resolve_type_ast(ty);
                     self.tcx.type_aliases.insert(name.clone(), resolved);
                 }
+                Item::Trait(tr) => {
+                    self.traits.insert(tr.name.clone(), tr.clone());
+                }
                 _ => {}
             }
         }
@@ -197,6 +225,50 @@ impl SemanticAnalyzer {
                 Item::Impl(imp) => {
                     self.tcx.active_generics =
                         imp.generics.iter().map(|g| g.name.clone()).collect();
+                    if let Some(ref tr_name) = imp.trait_name {
+                        if let Some(trait_decl) = self.traits.get(tr_name).cloned() {
+                            for req_m in &trait_decl.methods {
+                                let found = imp.methods.iter().find(|m| m.name == req_m.name);
+                                if let Some(m) = found {
+                                    if m.params.len() != req_m.params.len() {
+                                        self.diagnostics.push(
+                                            Diagnostic::error(
+                                                "E0110",
+                                                format!(
+                                                    "method `{}` in `impl {} for {}` has {} parameter(s), expected {}",
+                                                    m.name, tr_name, imp.target_name, m.params.len(), req_m.params.len()
+                                                ),
+                                                m.span.clone(),
+                                            ),
+                                        );
+                                    }
+                                } else {
+                                    self.diagnostics.push(
+                                        Diagnostic::error(
+                                            "E0110",
+                                            format!(
+                                                "type `{}` does not implement required method `{}` from trait `{}`",
+                                                imp.target_name, req_m.name, tr_name
+                                            ),
+                                            imp.span.clone(),
+                                        )
+                                        .with_help(format!(
+                                            "implement `fn {}(...)` inside `impl {} for {}`",
+                                            req_m.name, tr_name, imp.target_name
+                                        )),
+                                    );
+                                }
+                            }
+                        } else {
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    "E0102",
+                                    format!("undefined trait `{}`", tr_name),
+                                    imp.span.clone(),
+                                ),
+                            );
+                        }
+                    }
                     for m in &imp.methods {
                         let sym = self.build_fn_symbol(m, Some(&imp.target_name), false);
                         self.methods
@@ -820,7 +892,32 @@ impl SemanticAnalyzer {
                                 return self.infer_expr(&first_arg.expr);
                             }
                         }
+                        if name == "promote" {
+                            if let Some(first_arg) = args.first() {
+                                let arg_ty = self.infer_expr(&first_arg.expr);
+                                return arg_ty.strip_region().clone();
+                            }
+                        }
                         return fn_sym.ret_type;
+                    } else if let Some(var) = self.lookup_var(name).cloned() {
+                        match &var.ty {
+                            Type::Function(p_tys, ret_ty) => {
+                                if p_tys.len() != args.len() {
+                                    self.diagnostics.push(Diagnostic::error(
+                                        "E0103",
+                                        format!(
+                                            "callable `{}` expects {} argument(s), found {}",
+                                            name,
+                                            p_tys.len(),
+                                            args.len()
+                                        ),
+                                        expr.span.clone(),
+                                    ));
+                                }
+                                return (*ret_ty).as_ref().clone();
+                            }
+                            _ => return Type::I64,
+                        }
                     } else if !name.contains("::") {
                         self.diagnostics.push(
                             Diagnostic::error(
@@ -899,7 +996,7 @@ impl SemanticAnalyzer {
                         "is_empty" | "contains" | "starts_with" | "ends_with" => {
                             return Type::Bool
                         }
-                        "trim" | "to_upper" | "to_lower" | "clone" => return Type::String,
+                        "trim" | "to_upper" | "to_lower" | "slice_bytes" | "slice" | "clone" => return Type::String,
                         _ => {}
                     },
                     Type::Array(elem, _) | Type::Vec(elem) => match method.as_str() {
@@ -936,7 +1033,28 @@ impl SemanticAnalyzer {
                             return Type::Option(Box::new(Type::Shared(inner.clone())));
                         }
                     }
-                    _ => {}
+                    Type::Channel(inner) => match method.as_str() {
+                        "send" => return Type::Void,
+                        "recv" => return Type::Option(inner.clone()),
+                        "close" => return Type::Void,
+                        _ => {}
+                    },
+                    Type::Task(inner) => {
+                        if method == "join" {
+                            return (**inner).clone();
+                        }
+                    }
+                    _ => {
+                        if method == "recv" {
+                            return Type::Option(Box::new(Type::Unknown));
+                        }
+                        if method == "send" || method == "close" {
+                            return Type::Void;
+                        }
+                        if method == "join" {
+                            return Type::I64;
+                        }
+                    }
                 }
                 Type::Unknown
             }
@@ -952,6 +1070,11 @@ impl SemanticAnalyzer {
                     Type::Shared(inner) => inner.as_ref(),
                     other => other,
                 };
+                if let Type::Channel(inner) = clean_ty {
+                    if field == "sender" || field == "receiver" {
+                        return Type::Channel(inner.clone());
+                    }
+                }
                 if let Type::Struct(sname, _) = clean_ty {
                     if let Some(fields) = self.tcx.known_structs.get(sname) {
                         for (fname, fty) in fields {

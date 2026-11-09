@@ -40,23 +40,30 @@ fn test_stress_many_functions_and_structs() {
 
 #[test]
 fn test_stress_deeply_nested_expressions_and_blocks() {
-    let mut code = String::new();
-    code.push_str("fn main() {\n    var x: i64 = 0\n");
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let mut code = String::new();
+            code.push_str("fn main() {\n    var x: i64 = 0\n");
 
-    // 40 levels of nested if-else blocks
-    for i in 0..40 {
-        code.push_str(&format!("{}if x >= 0 {{\n", "    ".repeat(i + 1)));
-        code.push_str(&format!("{}x += 1\n", "    ".repeat(i + 2)));
-    }
-    for i in (0..40).rev() {
-        code.push_str(&format!("{}}}\n", "    ".repeat(i + 1)));
-    }
+            // 40 levels of nested if-else blocks
+            for i in 0..40 {
+                code.push_str(&format!("{}if x >= 0 {{\n", "    ".repeat(i + 1)));
+                code.push_str(&format!("{}x += 1\n", "    ".repeat(i + 2)));
+            }
+            for i in (0..40).rev() {
+                code.push_str(&format!("{}}}\n", "    ".repeat(i + 1)));
+            }
 
-    code.push_str("    println(x)\n}\n");
+            code.push_str("    println(x)\n}\n");
 
-    let pipeline = CompilerPipeline::new(2);
-    let res = pipeline.check_source("nested_stress.aps", &code);
-    assert!(!res.diagnostics.has_errors());
+            let pipeline = CompilerPipeline::new(2);
+            let res = pipeline.check_source("nested_stress.aps", &code);
+            assert!(!res.diagnostics.has_errors());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }
 
 #[test]

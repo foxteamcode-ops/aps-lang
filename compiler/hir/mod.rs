@@ -50,10 +50,15 @@ impl HirLowering {
         for item in &program.items {
             match item {
                 Item::Struct(s) => {
+                    if !s.generics.is_empty() {
+                        continue;
+                    }
+                    let mut tcx = self.tcx.clone();
+                    tcx.active_generics = s.generics.iter().map(|g| g.name.clone()).collect();
                     let fields = s
                         .fields
                         .iter()
-                        .map(|f| (f.name.clone(), self.tcx.resolve_type_ast(&f.ty).1))
+                        .map(|f| (f.name.clone(), tcx.resolve_type_ast(&f.ty).1))
                         .collect();
                     structs.push(HirStruct {
                         name: s.name.clone(),
@@ -101,6 +106,9 @@ impl HirLowering {
                     }
                 }
                 Item::Function(f) => {
+                    if !f.generics.is_empty() {
+                        continue;
+                    }
                     functions.push(self.lower_fn(f, None));
                 }
                 Item::Impl(imp) => {
@@ -122,6 +130,8 @@ impl HirLowering {
     }
 
     fn lower_fn(&self, f: &FnDecl, impl_target: Option<&str>) -> HirFunction {
+        let mut tcx = self.tcx.clone();
+        tcx.active_generics = f.generics.iter().map(|g| g.name.clone()).collect();
         let name = if let Some(tgt) = impl_target {
             format!("{}__{}", tgt, f.name)
         } else {
@@ -130,7 +140,7 @@ impl HirLowering {
 
         let mut params = Vec::new();
         for p in &f.params {
-            let (cap_t, mut ty) = self.tcx.resolve_type_ast(&p.ty);
+            let (cap_t, mut ty) = tcx.resolve_type_ast(&p.ty);
             if let Some(tgt) = impl_target {
                 if p.name == "self"
                     && matches!(ty, Type::Struct(ref n, _) if n == "Self" || n == tgt)
@@ -146,7 +156,7 @@ impl HirLowering {
             params.push((p.name.clone(), cap, ty, p.is_mutable || cap == Capability::Write));
         }
 
-        let (_, mut ret_type) = self.tcx.resolve_type_ast(&f.ret_type);
+        let (_, mut ret_type) = tcx.resolve_type_ast(&f.ret_type);
         if let Some(tgt) = impl_target {
             if matches!(ret_type, Type::Struct(ref n, _) if n == "Self") {
                 ret_type = Type::Struct(tgt.to_string(), Vec::new());
@@ -173,59 +183,12 @@ impl HirLowering {
                     body,
                     span,
                 } => {
-                    if let ExprKind::Range {
-                        start,
-                        end,
-                        inclusive,
-                    } = &iter.kind
-                    {
-                        stmts.push(Stmt::Var {
-                            name: var.clone(),
-                            ty: TypeAst::Named {
-                                name: "i64".to_string(),
-                                args: Vec::new(),
-                            },
-                            init: (**start).clone(),
-                            span: span.clone(),
-                        });
-                        let cmp_op = if *inclusive { BinOp::Le } else { BinOp::Lt };
-                        let cond = Expr {
-                            kind: ExprKind::Binary {
-                                op: cmp_op,
-                                left: Box::new(Expr {
-                                    kind: ExprKind::Ident(var.clone()),
-                                    span: span.clone(),
-                                }),
-                                right: end.clone(),
-                            },
-                            span: span.clone(),
-                        };
-                        let mut loop_body = self.desugar_block(body);
-                        loop_body.stmts.push(Stmt::Assign {
-                            target: Expr {
-                                kind: ExprKind::Ident(var.clone()),
-                                span: span.clone(),
-                            },
-                            op: AssignOp::AddAssign,
-                            value: Expr {
-                                kind: ExprKind::IntLit(1, None),
-                                span: span.clone(),
-                            },
-                            span: span.clone(),
-                        });
-                        stmts.push(Stmt::While {
-                            cond,
-                            body: loop_body,
-                            span: span.clone(),
-                        });
-                    } else {
-                        stmts.push(Stmt::For {
-                            var: var.clone(),
-                            iter: iter.clone(),
-                            body: self.desugar_block(body),
-                            span: span.clone(),
-                        });
-                    }
+                    stmts.push(Stmt::For {
+                        var: var.clone(),
+                        iter: iter.clone(),
+                        body: self.desugar_block(body),
+                        span: span.clone(),
+                    });
                 }
                 Stmt::While { cond, body, span } => {
                     stmts.push(Stmt::While {

@@ -179,20 +179,94 @@ fn collect_aps_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Builds `file`, runs it with a timeout, requires exit code 0 and, when a sibling
+/// `<file>.expected` exists, requires identical stdout (line endings normalised).
+fn run_program_test(pipeline: &CompilerPipeline, file: &Path, src: &str) -> Result<String, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("test");
+    let dir = env::temp_dir().join("aps_test_run");
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create temp dir: {}", e))?;
+    let exe = dir.join(format!("{}{}", stem, if cfg!(windows) { ".exe" } else { "" }));
+    pipeline
+        .build_executable(&file.to_string_lossy(), src, &exe)
+        .map_err(|e| format!("build failed:\n{}", e))?;
+
+    let mut child = Command::new(&exe)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot start program: {}", e))?;
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) => {
+                if start.elapsed() > Duration::from_secs(20) {
+                    let _ = child.kill();
+                    return Err("timed out after 20s".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => return Err(format!("wait failed: {}", e)),
+        }
+    };
+    let mut stdout = String::new();
+    if let Some(mut so) = child.stdout.take() {
+        let mut buf = Vec::new();
+        let _ = so.read_to_end(&mut buf);
+        stdout = String::from_utf8_lossy(&buf).replace("\r\n", "\n");
+    }
+    if !status.success() {
+        let mut stderr = String::new();
+        if let Some(mut se) = child.stderr.take() {
+            let mut buf = Vec::new();
+            let _ = se.read_to_end(&mut buf);
+            stderr = String::from_utf8_lossy(&buf).to_string();
+        }
+        return Err(format!("exit status {}\n{}", status, stderr));
+    }
+    let expected_path = PathBuf::from(format!("{}.expected", file.display()));
+    if expected_path.exists() {
+        let expected = fs::read_to_string(&expected_path)
+            .map_err(|e| format!("cannot read expected file: {}", e))?
+            .replace("\r\n", "\n");
+        if expected != stdout {
+            return Err(format!(
+                "stdout differs from {}\n--- expected ---\n{}\n--- actual ---\n{}",
+                expected_path.display(),
+                expected,
+                stdout
+            ));
+        }
+        return Ok(" (output matched)".to_string());
+    }
+    Ok(String::new())
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let cmd = args.first().map(|s| s.as_str()).unwrap_or("help");
 
     let mut opt_level = 2u8;
+    let mut debug_info = false;
     let mut emit_llvm = false;
     let mut emit_ir = false;
+    let mut exec_tests = false;
     let mut custom_output: Option<PathBuf> = None;
     let mut positional: Vec<String> = Vec::new();
 
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
-        if a == "-O0" {
+        if a == "--run" {
+            exec_tests = true;
+        } else if a == "-g" || a == "--debug" {
+            debug_info = true;
+        } else if a == "-O0" {
             opt_level = 0;
         } else if a == "-O1" {
             opt_level = 1;
@@ -298,7 +372,8 @@ fn main() {
                     process::exit(1);
                 }
             };
-            let pipeline = CompilerPipeline::new(opt_level);
+            let mut pipeline = CompilerPipeline::new(opt_level);
+            pipeline.debug_info = debug_info;
             let fname = file.to_string_lossy();
             let res = pipeline.check_source(&fname, &src);
             if res.diagnostics.has_errors() {
@@ -339,7 +414,8 @@ fn main() {
                     .map(PathBuf::from)
                     .unwrap_or_else(|| default_output_exe(&file))
             });
-            let pipeline = CompilerPipeline::new(opt_level);
+            let mut pipeline = CompilerPipeline::new(opt_level);
+            pipeline.debug_info = debug_info;
             let fname = file.to_string_lossy();
             match pipeline.build_executable(&fname, &src, &out_exe) {
                 Ok(res) => {
@@ -378,7 +454,8 @@ fn main() {
                 }
             };
             let out_exe = custom_output.clone().unwrap_or_else(|| default_output_exe(&file));
-            let pipeline = CompilerPipeline::new(opt_level);
+            let mut pipeline = CompilerPipeline::new(opt_level);
+            pipeline.debug_info = debug_info;
             let fname = file.to_string_lossy();
             if let Err(err) = pipeline.build_executable(&fname, &src, &out_exe) {
                 eprint!("{}", err);
@@ -414,7 +491,8 @@ fn main() {
                 println!("No `.aps` test files found in `{}`", target.display());
                 return;
             }
-            let pipeline = CompilerPipeline::new(opt_level);
+            let mut pipeline = CompilerPipeline::new(opt_level);
+            pipeline.debug_info = debug_info;
             let mut passed = 0usize;
             let mut failed = 0usize;
             for f in &files {
@@ -424,6 +502,18 @@ fn main() {
                     println!("test {} ... FAILED", f.display());
                     eprint!("{}", res.diagnostics.render_all(&src));
                     failed += 1;
+                } else if exec_tests {
+                    match run_program_test(&pipeline, f, &src) {
+                        Ok(note) => {
+                            println!("test {} ... ok{}", f.display(), note);
+                            passed += 1;
+                        }
+                        Err(msg) => {
+                            println!("test {} ... FAILED (run)", f.display());
+                            eprintln!("{}", msg);
+                            failed += 1;
+                        }
+                    }
                 } else {
                     println!("test {} ... ok", f.display());
                     passed += 1;

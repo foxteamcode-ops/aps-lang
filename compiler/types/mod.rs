@@ -129,6 +129,14 @@ impl Type {
             (t1, Type::Shared(t2)) => t1.is_compatible_with(t2),
             (Type::Weak(t1), Type::Weak(t2)) => t1.is_compatible_with(t2),
             (Type::Pointer(t1), Type::Pointer(t2)) => t1.is_compatible_with(t2),
+            (Type::Function(p1, r1), Type::Function(p2, r2)) => {
+                p1.len() == p2.len()
+                    && p1
+                        .iter()
+                        .zip(p2.iter())
+                        .all(|((_, t1), (_, t2))| t1.is_compatible_with(t2))
+                    && r1.is_compatible_with(r2)
+            }
             // Allow integer and float family contextual compatibility while rejecting int<->float without `as`
             (t1, t2) if t1.is_integer() && t2.is_integer() => true,
             (t1, t2) if t1.is_float() && t2.is_float() => true,
@@ -281,7 +289,7 @@ impl TypeContext {
                     "Mutex" => Type::Mutex(Box::new(
                         resolved_args.into_iter().next().unwrap_or(Type::I64),
                     )),
-                    "Channel" => Type::Channel(Box::new(
+                    "Channel" | "Receiver" | "Sender" => Type::Channel(Box::new(
                         resolved_args.into_iter().next().unwrap_or(Type::I64),
                     )),
                     "Task" => Type::Task(Box::new(

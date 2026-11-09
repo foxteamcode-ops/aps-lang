@@ -280,18 +280,43 @@ impl Parser {
     fn parse_generics(&mut self) -> Vec<GenericParam> {
         let mut params = Vec::new();
         if self.eat(&TokenKind::Lt) {
-            while !self.is_eof() && !self.eat(&TokenKind::Gt) {
+            let mut closed = false;
+            while !self.is_eof() {
+                if self.eat(&TokenKind::Gt) {
+                    closed = true;
+                    break;
+                }
                 let (name, _) = self.expect_ident("generic parameter");
+                if name == "_error" {
+                    break;
+                }
                 let bound = if self.eat(&TokenKind::Colon) {
                     Some(self.expect_ident("trait bound").0)
                 } else {
                     None
                 };
                 params.push(GenericParam { name, bound });
-                if !self.eat(&TokenKind::Comma) {
-                    let _ = self.eat(&TokenKind::Gt);
+                if self.eat(&TokenKind::Gt) {
+                    closed = true;
                     break;
                 }
+                if self.peek_kind() == &TokenKind::Shr {
+                    self.tokens[self.pos].kind = TokenKind::Gt;
+                    closed = true;
+                    break;
+                }
+                if !self.eat(&TokenKind::Comma) {
+                    if self.eat(&TokenKind::Gt) {
+                        closed = true;
+                    } else if self.peek_kind() == &TokenKind::Shr {
+                        self.tokens[self.pos].kind = TokenKind::Gt;
+                        closed = true;
+                    }
+                    break;
+                }
+            }
+            if !closed {
+                return Vec::new();
             }
         }
         params
@@ -399,6 +424,42 @@ impl Parser {
         }
         if (name == "Shared" || name == "shared") && args.len() == 1 {
             return TypeAst::Shared(Box::new(args.remove(0)));
+        }
+
+        let is_builtin = matches!(
+            name.as_str(),
+            "Vec"
+                | "HashMap"
+                | "HashSet"
+                | "Option"
+                | "Result"
+                | "Channel"
+                | "channel"
+                | "Receiver"
+                | "Sender"
+                | "Task"
+                | "Shared"
+                | "Weak"
+                | "Mutex"
+                | "spawn_thread"
+                | "block_on"
+                | "promote"
+        );
+        if !is_builtin && !args.is_empty() {
+            let mut arg_names = Vec::new();
+            for a in &args {
+                if let TypeAst::Named { name: aname, args: sub_args } = a {
+                    if sub_args.is_empty() {
+                        arg_names.push(aname.clone());
+                    }
+                }
+            }
+            if arg_names.len() == args.len() {
+                return TypeAst::Named {
+                    name: format!("{}${}", name, arg_names.join("$")),
+                    args: Vec::new(),
+                };
+            }
         }
 
         TypeAst::Named { name, args }
@@ -1061,11 +1122,19 @@ impl Parser {
         loop {
             // Do not chain across a newline if the next token is `(` or `[`
             if self.eat(&TokenKind::Dot) {
-                let (member, _) = self.expect_ident("field or method name");
+                let (mut member, _) = self.expect_ident("field or method name");
                 // Optional turbofish `.<T>(...)`
                 if self.peek_kind() == &TokenKind::ColonColon {
                     self.advance();
-                    let _ = self.parse_generics();
+                    let m_gen = self.parse_generics();
+                    if !m_gen.is_empty() {
+                        let arg_str = m_gen
+                            .iter()
+                            .map(|g| g.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join("$");
+                        member = format!("{}${}", member, arg_str);
+                    }
                 }
                 if self.eat(&TokenKind::LParen) {
                     let args = self.parse_call_args();
@@ -1233,24 +1302,78 @@ impl Parser {
                 // Check `::` path or generic instantiation `Type::<T>`
                 while self.eat(&TokenKind::ColonColon) {
                     if self.peek_kind() == &TokenKind::Lt {
-                        let _ = self.parse_generics();
+                        let gen_args = self.parse_generics();
+                        let is_builtin = matches!(
+                            name.as_str(),
+                            "Vec"
+                                | "HashMap"
+                                | "HashSet"
+                                | "Option"
+                                | "Result"
+                                | "Channel"
+                                | "channel"
+                                | "Receiver"
+                                | "Sender"
+                                | "Task"
+                                | "Shared"
+                                | "Weak"
+                                | "Mutex"
+                                | "spawn_thread"
+                                | "block_on"
+                                | "promote"
+                        );
+                        if !is_builtin && !gen_args.is_empty() {
+                            let arg_str = gen_args
+                                .iter()
+                                .map(|g| g.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join("$");
+                            name = format!("{}${}", name, arg_str);
+                        }
                         break;
                     }
                     let (seg, _) = self.expect_ident("path segment");
                     name = format!("{}::{}", name, seg);
                 }
 
-                // Check generic struct init `Pair<i64> { ... }` or generic type call `Vec<i64>.new()`
+                // Check generic struct init `Pair<i64> { ... }` or generic type call `min_val<f64>(...)`
                 if self.peek_kind() == &TokenKind::Lt {
                     let saved_pos = self.pos;
                     let saved_diag_len = self.diagnostics.diagnostics.len();
-                    let _ = self.parse_generics();
-                    if self.is_struct_init_ahead()
-                        || self.peek_kind() == &TokenKind::LParen
-                        || self.peek_kind() == &TokenKind::Dot
-                        || self.peek_kind() == &TokenKind::ColonColon
+                    let gen_args = self.parse_generics();
+                    if !gen_args.is_empty()
+                        && (self.is_struct_init_ahead()
+                            || self.peek_kind() == &TokenKind::LParen
+                            || self.peek_kind() == &TokenKind::ColonColon)
                     {
                         // Valid generic type or function instantiation
+                        let is_builtin = matches!(
+                            name.as_str(),
+                            "Vec"
+                                | "HashMap"
+                                | "HashSet"
+                                | "Option"
+                                | "Result"
+                                | "Channel"
+                                | "channel"
+                                | "Receiver"
+                                | "Sender"
+                                | "Task"
+                                | "Shared"
+                                | "Weak"
+                                | "Mutex"
+                                | "spawn_thread"
+                                | "block_on"
+                                | "promote"
+                        );
+                        if !is_builtin && !gen_args.is_empty() {
+                            let arg_str = gen_args
+                                .iter()
+                                .map(|g| g.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join("$");
+                            name = format!("{}${}", name, arg_str);
+                        }
                     } else {
                         self.pos = saved_pos;
                         self.diagnostics.diagnostics.truncate(saved_diag_len);
@@ -1555,5 +1678,27 @@ fn main() {
         let prog = parser.parse_program();
         assert!(!parser.diagnostics.has_errors());
         assert_eq!(prog.items.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_less_than_binary_op_not_confused_with_generics() {
+        let src = r#"
+struct Config {
+    min_val: i64
+}
+
+fn check_threshold(net: i64, cfg: Config) -> bool {
+    if net < cfg.min_val {
+        return false
+    }
+    return true
+}
+"#;
+        let mut lexer = Lexer::new("test.aps", src);
+        let tokens = lexer.tokenize();
+        let mut parser = Parser::new(tokens);
+        let prog = parser.parse_program();
+        assert!(!parser.diagnostics.has_errors());
+        assert_eq!(prog.items.len(), 2);
     }
 }

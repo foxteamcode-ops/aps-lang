@@ -36,3 +36,7 @@ benchmarks/stress_workload/bin/*.pdb
 *~
 Thumbs.db
 [Dd]esktop.ini
+
+# Test outputs
+drivers_report.csv
+tests/repro/

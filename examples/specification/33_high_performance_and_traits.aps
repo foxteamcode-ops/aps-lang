@@ -1,0 +1,71 @@
+// ============================================================================
+// Файл: 33_high_performance_and_traits.aps
+// Описание: Демонстрация трёх столпов языка APS:
+// 1. Скорость: Region Arena аллокация и высокоточные таймеры clock_nanos()
+// 2. Безопасность: AMA borrow checker и Law of Exclusivity без гонок и утечек
+// 3. Лёгкость: Трейты (trait) и нулевая цена абстракций (Zero-Cost Abstractions)
+// ============================================================================
+
+module high_performance_demo
+
+trait Measurable {
+    fn compute_score(self: read Self) -> i64
+}
+
+struct TelemetryNode {
+    id: i64
+    cpu_percent: i64
+    latency_us: i64
+}
+
+impl Measurable for TelemetryNode {
+    fn compute_score(self: read TelemetryNode) -> i64 {
+        return self.cpu_percent * 1000 + self.latency_us
+    }
+}
+
+fn process_node(node: read TelemetryNode) -> i64 {
+    return node.compute_score()
+}
+
+fn main() {
+    println("=== APS: Скорость, Безопасность и Лёгкость ===")
+
+    // 1. Лёгкость и абстракции: использование Trait
+    let node = TelemetryNode {
+        id: 101,
+        cpu_percent: 18,
+        latency_us: 420
+    }
+    let score = process_node(read node)
+    print("  [Trait Measurable] Метрика узла #101: ")
+    println(score)
+
+    // 2. Скорость: Замер Region Arena аллокации (10 000 объектов)
+    let t_start = clock_nanos()
+
+    var total_metric: i64 = 0
+    region perf_arena {
+        var i: i64 = 0
+        while i < 10000 {
+            let item = perf_arena.alloc(TelemetryNode {
+                id: i,
+                cpu_percent: 15,
+                latency_us: 120
+            })
+            total_metric += item.latency_us
+            i += 1
+        }
+    }
+
+    let t_end = clock_nanos()
+    let elapsed_ns = t_end - t_start
+
+    print("  [Speed: Region Arena] 10,000 объектов выделено и мгновенно освобождено за: ")
+    print(elapsed_ns)
+    println(" нс (без пауз GC и без malloc)")
+
+    print("  Контрольная сумма метрик: ")
+    println(total_metric)
+    println("APS подтверждает: 0 утечек памяти, 0 накладных расходов GC, максимальная скорость!")
+}

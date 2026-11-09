@@ -48,7 +48,9 @@ impl Optimizer {
                         value: Some(ret_expr),
                         ..
                     } => {
-                        if !Self::expr_contains_call_to(ret_expr, &f.name) {
+                        if !Self::expr_contains_call_to(ret_expr, &f.name)
+                            && !Self::expr_has_control_flow(ret_expr)
+                        {
                             self.inline_candidates
                                 .insert(f.name.clone(), (param_names, ret_expr.clone()));
                         }
@@ -58,7 +60,9 @@ impl Optimizer {
                         has_semi: false,
                         ..
                     } => {
-                        if !Self::expr_contains_call_to(ret_expr, &f.name) {
+                        if !Self::expr_contains_call_to(ret_expr, &f.name)
+                            && !Self::expr_has_control_flow(ret_expr)
+                        {
                             self.inline_candidates
                                 .insert(f.name.clone(), (param_names, ret_expr.clone()));
                         }
@@ -91,6 +95,89 @@ impl Optimizer {
             ExprKind::Unary { expr: inner, .. } => Self::expr_contains_call_to(inner, target),
             _ => false,
         }
+    }
+
+    fn expr_has_control_flow(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Match { arms, .. } => {
+                arms.iter().any(|arm| Self::block_has_control_flow(&arm.body))
+            }
+            ExprKind::Block(b) => Self::block_has_control_flow(b),
+            ExprKind::If {
+                cond,
+                then_block,
+                else_branch,
+            } => {
+                Self::expr_has_control_flow(cond)
+                    || Self::block_has_control_flow(then_block)
+                    || else_branch
+                        .as_ref()
+                        .map_or(false, |e| Self::expr_has_control_flow(e))
+            }
+            ExprKind::Call { callee, args } => {
+                Self::expr_has_control_flow(callee)
+                    || args.iter().any(|a| Self::expr_has_control_flow(&a.expr))
+            }
+            ExprKind::Binary { left, right, .. } => {
+                Self::expr_has_control_flow(left) || Self::expr_has_control_flow(right)
+            }
+            ExprKind::Unary { expr: inner, .. } => Self::expr_has_control_flow(inner),
+            ExprKind::Cast { expr: inner, .. } => Self::expr_has_control_flow(inner),
+            ExprKind::FieldAccess { base, .. } => Self::expr_has_control_flow(base),
+            ExprKind::Index { base, index } => {
+                Self::expr_has_control_flow(base) || Self::expr_has_control_flow(index)
+            }
+            ExprKind::ArrayLit(elems) => {
+                elems.iter().any(|e| Self::expr_has_control_flow(e))
+            }
+            ExprKind::StructInit { fields, .. } => {
+                fields.iter().any(|(_, e)| Self::expr_has_control_flow(e))
+            }
+            _ => false,
+        }
+    }
+
+    fn block_has_control_flow(b: &Block) -> bool {
+        for stmt in &b.stmts {
+            match stmt {
+                Stmt::Return { .. } | Stmt::Break { .. } | Stmt::Continue { .. } => return true,
+                Stmt::Expr { expr, .. } => {
+                    if Self::expr_has_control_flow(expr) {
+                        return true;
+                    }
+                }
+                Stmt::Let { init, .. } | Stmt::Var { init, .. } => {
+                    if Self::expr_has_control_flow(init) {
+                        return true;
+                    }
+                }
+                Stmt::Assign { value, .. } => {
+                    if Self::expr_has_control_flow(value) {
+                        return true;
+                    }
+                }
+                Stmt::While { cond, body, .. } => {
+                    if Self::expr_has_control_flow(cond) || Self::block_has_control_flow(body) {
+                        return true;
+                    }
+                }
+                Stmt::For { iter, body, .. } => {
+                    if Self::expr_has_control_flow(iter) || Self::block_has_control_flow(body) {
+                        return true;
+                    }
+                }
+                Stmt::Loop { body, .. }
+                | Stmt::Defer { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Unsafe { body, .. } => {
+                    if Self::block_has_control_flow(body) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     fn optimize_function(&mut self, func: &mut ApsIrFunction) {
@@ -651,6 +738,41 @@ impl Optimizer {
                             expr: Self::substitute_params(&a.expr, map),
                         })
                         .collect(),
+                },
+                span,
+            },
+            ExprKind::StructInit { name, fields } => Expr {
+                kind: ExprKind::StructInit {
+                    name: name.clone(),
+                    fields: fields
+                        .iter()
+                        .map(|(n, e)| (n.clone(), Self::substitute_params(e, map)))
+                        .collect(),
+                },
+                span,
+            },
+            ExprKind::ArrayLit(elems) => Expr {
+                kind: ExprKind::ArrayLit(
+                    elems.iter().map(|e| Self::substitute_params(e, map)).collect(),
+                ),
+                span,
+            },
+            ExprKind::Index { base, index } => Expr {
+                kind: ExprKind::Index {
+                    base: Box::new(Self::substitute_params(base, map)),
+                    index: Box::new(Self::substitute_params(index, map)),
+                },
+                span,
+            },
+            ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } => Expr {
+                kind: ExprKind::Range {
+                    start: Box::new(Self::substitute_params(start, map)),
+                    end: Box::new(Self::substitute_params(end, map)),
+                    inclusive: *inclusive,
                 },
                 span,
             },

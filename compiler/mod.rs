@@ -6,6 +6,7 @@ pub mod hir;
 pub mod ir;
 pub mod lexer;
 pub mod mir;
+pub mod monomorphize;
 pub mod optimize;
 pub mod parser;
 pub mod semantic;
@@ -37,6 +38,7 @@ pub struct CompilationResult {
 pub struct CompilerPipeline {
     pub opt_level: u8,
     pub target_triple: Option<String>,
+    pub debug_info: bool,
 }
 
 impl CompilerPipeline {
@@ -44,6 +46,7 @@ impl CompilerPipeline {
         Self {
             opt_level,
             target_triple: None,
+            debug_info: false,
         }
     }
 
@@ -59,10 +62,13 @@ impl CompilerPipeline {
 
         // 2. Parser -> AST
         let mut parser = Parser::new(tokens);
-        let program = parser.parse_program();
+        let mut program = parser.parse_program();
         for d in parser.diagnostics.diagnostics {
             all_diags.push(d);
         }
+
+        // 2.5 Monomorphization pass for generics
+        crate::compiler::monomorphize::monomorphize_program(&mut program);
 
         // 3. Semantic Analysis & Type Checking
         let mut sem = SemanticAnalyzer::new();
@@ -94,6 +100,7 @@ impl CompilerPipeline {
 
         // 8. LLVM IR Generation
         let mut backend = LlvmBackend::new(self.target_triple.as_deref());
+        backend.debug_info = self.debug_info;
         let llvm_ir = if !all_diags.has_errors() {
             backend.generate_llvm_ir(&aps_ir)
         } else {
@@ -120,7 +127,8 @@ impl CompilerPipeline {
         if res.diagnostics.has_errors() {
             return Err(res.diagnostics.render_all(source));
         }
-        let backend = LlvmBackend::new(self.target_triple.as_deref());
+        let mut backend = LlvmBackend::new(self.target_triple.as_deref());
+        backend.debug_info = self.debug_info;
         backend.compile_to_executable(&res.llvm_ir, output_exe, self.opt_level)?;
         Ok(res)
     }

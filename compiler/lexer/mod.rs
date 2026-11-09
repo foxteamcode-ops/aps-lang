@@ -119,6 +119,8 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(file: &str, src: &'a str) -> Self {
+        // Tolerate a UTF-8 byte-order mark (common with Windows editors/PowerShell).
+        let src = src.strip_prefix('\u{feff}').unwrap_or(src);
         Self {
             file: file.to_string(),
             src,
