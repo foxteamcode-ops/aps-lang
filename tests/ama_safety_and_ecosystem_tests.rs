@@ -591,3 +591,57 @@ fn main() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("ARCH_SOLUTIONS_OK"));
 }
+
+#[test]
+fn test_hashmap_numeric_keys_and_string_security_fixes() {
+    let src = r#"
+module test_fixes
+
+import std.collections
+
+fn main() {
+    // 1. Verify numeric keys >= 65536 in HashMap (previously crashed with 0xC0000005)
+    var m = HashMap<i64, i64>.new()
+    m.insert(100000, 42)
+    m.insert(100008, 99)
+    match m.get(100000) {
+        Some(v) => assert(v == 42),
+        None => panic("missing key 100000")
+    }
+    match m.get(100008) {
+        Some(v) => assert(v == 99),
+        None => panic("missing key 100008")
+    }
+
+    // 2. Verify string parsing on edge cases
+    let s = "   -123456"
+    assert(s.to_i64() == -123456)
+
+    // 3. Verify sha256_hex
+    let hash = sha256_hex("aps-security-audit")
+    assert(hash.len() == 64)
+
+    println("FIXES_VERIFIED_OK")
+}
+"#;
+    let res = check_code(src);
+    assert!(!res.diagnostics.has_errors());
+
+    let out_dir = PathBuf::from("target/test_artifacts");
+    let _ = fs::create_dir_all(&out_dir);
+    let exe_path = out_dir.join(if cfg!(windows) {
+        "security_fixes_test.exe"
+    } else {
+        "security_fixes_test"
+    });
+    let pipeline = CompilerPipeline::new(2);
+    pipeline
+        .build_executable("security_fixes_test.aps", src, &exe_path)
+        .expect("should compile security fixes test binary");
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("should execute security fixes test binary");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("FIXES_VERIFIED_OK"));
+}

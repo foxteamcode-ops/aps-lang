@@ -963,14 +963,31 @@ impl SemanticAnalyzer {
                         {
                             return m_sym.ret_type;
                         }
+                        if type_or_var == "HashMap" || type_or_var.starts_with("HashMap$") {
+                            let (k, v) = if type_or_var.starts_with("HashMap$") {
+                                let parts: Vec<&str> = type_or_var.split('$').collect();
+                                let k = parts.get(1).map(|t| match *t {
+                                    "String" | "str" => Type::String,
+                                    "f32" | "f64" => Type::F64,
+                                    "bool" => Type::Bool,
+                                    "char" => Type::Char,
+                                    _ => Type::I64,
+                                }).unwrap_or(Type::Unknown);
+                                let v = parts.get(2).map(|t| match *t {
+                                    "String" | "str" => Type::String,
+                                    "f32" | "f64" => Type::F64,
+                                    "bool" => Type::Bool,
+                                    "char" => Type::Char,
+                                    _ => Type::I64,
+                                }).unwrap_or(Type::Unknown);
+                                (k, v)
+                            } else {
+                                (Type::Unknown, Type::Unknown)
+                            };
+                            return Type::HashMap(Box::new(k), Box::new(v));
+                        }
                         match type_or_var.as_str() {
                             "Vec" => return Type::Vec(Box::new(Type::Unknown)),
-                            "HashMap" => {
-                                return Type::HashMap(
-                                    Box::new(Type::Unknown),
-                                    Box::new(Type::Unknown),
-                                )
-                            }
                             "HashSet" => return Type::HashSet(Box::new(Type::Unknown)),
                             "Mutex" => {
                                 let inner = args

@@ -96,6 +96,11 @@ typedef struct ApsStr {
     int64_t len;
 } ApsStr;
 
+void* aps_alloc(int64_t size);
+void aps_free(void* ptr);
+APS_HOT int64_t aps_str_eq(const void* a_ptr, const void* b_ptr);
+static ApsStr* aps_str_make(const char* data, int64_t len);
+
 static int g_aps_utf8_initialized = 0;
 static int64_t g_aps_perf_freq = 0;
 static int64_t aps_get_perf_freq(void);
@@ -148,7 +153,7 @@ static inline const char* aps_to_c_str(const void* s_ptr) {
     const ApsStr* s = (const ApsStr*)s_ptr;
     if (s->data && s->len >= 0 && s->len < 1000000000LL) {
         if (s->data[s->len] == '\0') return s->data;
-        char* buf = (char*)malloc((size_t)s->len + 1);
+        char* buf = (char*)aps_alloc(s->len + 1);
         if (!buf) return "";
         memcpy(buf, s->data, (size_t)s->len);
         buf[s->len] = '\0';
@@ -293,41 +298,57 @@ typedef struct {
     int64_t len;
     int64_t cap;
     ApsMapEntry* entries;
+    int64_t is_str_key;
 } ApsMap;
 
-static inline uint64_t aps_hash_calc(uint64_t key) {
-    if (key > 0x10000 && (key & 7) == 0) {
-        const unsigned char* s = (const unsigned char*)key;
-        uint64_t h = 14695981039346656037ULL;
-        size_t len = 0;
-        while (s[len] != '\0' && len < 256) {
-            h ^= s[len];
-            h *= 1099511628211ULL;
-            len++;
-        }
-        if (len > 0) return h | 1ULL;
+static inline uint64_t aps_hash_calc_str(const void* key) {
+    if (!key) return 1ULL;
+    const ApsStr* s = (const ApsStr*)key;
+    const unsigned char* p = NULL;
+    int64_t len = 0;
+    if (s->data && s->len >= 0 && s->len < 1000000000LL) {
+        p = (const unsigned char*)s->data;
+        len = s->len;
+    } else {
+        p = (const unsigned char*)key;
+        len = (int64_t)strlen((const char*)key);
     }
+    uint64_t h = 14695981039346656037ULL;
+    for (int64_t i = 0; i < len; i++) {
+        h ^= p[i];
+        h *= 1099511628211ULL;
+    }
+    return h | 1ULL;
+}
+
+static inline uint64_t aps_hash_calc_int(uint64_t key) {
     uint64_t x = key;
-    x ^= x >> 33;
-    x *= 0xff51afd7ed558ccdULL;
-    x ^= x >> 33;
-    x *= 0xc4ceb9fe1a85ec53ULL;
-    x ^= x >> 33;
+    x ^= x >> 30;
+    x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27;
+    x *= 0x94d049bb133111ebULL;
+    x ^= x >> 31;
     return x | 1ULL;
 }
 
-static inline int aps_keys_equal(uint64_t k1, uint64_t k2) {
+static inline uint64_t aps_hash_calc_typed(uint64_t key, int64_t is_str) {
+    if (is_str) return aps_hash_calc_str((const void*)key);
+    return aps_hash_calc_int(key);
+}
+
+static inline int aps_keys_equal_typed(uint64_t k1, uint64_t k2, int64_t is_str) {
     if (k1 == k2) return 1;
-    if (k1 > 0x10000 && k2 > 0x10000 && (k1 & 7) == 0 && (k2 & 7) == 0) {
-        return strcmp((const char*)k1, (const char*)k2) == 0;
+    if (is_str) {
+        return aps_str_eq((const void*)k1, (const void*)k2);
     }
     return 0;
 }
 
-void* aps_map_new(void) {
+void* aps_map_new(int64_t is_str_key) {
     ApsMap* m = (ApsMap*)calloc(1, sizeof(ApsMap));
     m->cap = 16;
     m->len = 0;
+    m->is_str_key = is_str_key;
     m->entries = (ApsMapEntry*)calloc(16, sizeof(ApsMapEntry));
     return m;
 }
@@ -335,6 +356,7 @@ void* aps_map_new(void) {
 void aps_map_insert(void* map_ptr, uint64_t key, uint64_t val) {
     if (!map_ptr) return;
     ApsMap* m = (ApsMap*)map_ptr;
+    int64_t is_str = m->is_str_key;
     if (m->len * 10 >= m->cap * 7) {
         int64_t old_cap = m->cap;
         ApsMapEntry* old_entries = m->entries;
@@ -354,10 +376,10 @@ void aps_map_insert(void* map_ptr, uint64_t key, uint64_t val) {
         m->entries = new_entries;
         m->cap = new_cap;
     }
-    uint64_t h = aps_hash_calc(key);
+    uint64_t h = aps_hash_calc_typed(key, is_str);
     size_t idx = (size_t)(h & (uint64_t)(m->cap - 1));
     while (m->entries[idx].occupied) {
-        if (m->entries[idx].hash == h && aps_keys_equal(m->entries[idx].key, key)) {
+        if (m->entries[idx].hash == h && aps_keys_equal_typed(m->entries[idx].key, key, is_str)) {
             m->entries[idx].val = val;
             return;
         }
@@ -381,11 +403,12 @@ void* aps_map_get(void* map_ptr, uint64_t key) {
         res->tag = 0;
         return res;
     }
-    uint64_t h = aps_hash_calc(key);
+    int64_t is_str = m->is_str_key;
+    uint64_t h = aps_hash_calc_typed(key, is_str);
     size_t idx = (size_t)(h & (uint64_t)(m->cap - 1));
     size_t start = idx;
     while (m->entries[idx].occupied) {
-        if (m->entries[idx].hash == h && aps_keys_equal(m->entries[idx].key, key)) {
+        if (m->entries[idx].hash == h && aps_keys_equal_typed(m->entries[idx].key, key, is_str)) {
             res->tag = 1; /* Some */
             res->payload0 = (int64_t)m->entries[idx].val;
             return res;
@@ -709,6 +732,7 @@ void aps_sleep_ms(int64_t ms) {
 }
 
 int64_t aps_abs(int64_t x) {
+    if (x == INT64_MIN) return INT64_MAX;
     return x < 0 ? -x : x;
 }
 
@@ -976,7 +1000,33 @@ void* aps_tcp_stream_connect(const void* host_ptr, int64_t port, int64_t timeout
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)port);
-    addr.sin_addr.s_addr = inet_addr(host);
+
+    unsigned long ip = inet_addr(host);
+    if (ip == INADDR_NONE && strcmp(host, "255.255.255.255") != 0) {
+        struct hostent* he = gethostbyname(host);
+        if (he && he->h_addr_list && he->h_addr_list[0]) {
+            memcpy(&addr.sin_addr, he->h_addr_list[0], sizeof(addr.sin_addr));
+        } else {
+            closesocket(s);
+            return aps_make_result(0, (void*)aps_str_from_cstr("failed to resolve host"));
+        }
+    } else {
+        addr.sin_addr.s_addr = ip;
+    }
+
+    if (timeout_ms > 0) {
+#ifdef _WIN32
+        DWORD to_ms = (DWORD)timeout_ms;
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to_ms, sizeof(to_ms));
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&to_ms, sizeof(to_ms));
+#else
+        struct timeval to_tv;
+        to_tv.tv_sec = (time_t)(timeout_ms / 1000);
+        to_tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const void*)&to_tv, sizeof(to_tv));
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const void*)&to_tv, sizeof(to_tv));
+#endif
+    }
     if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
         closesocket(s);
         return aps_make_result(0, (void*)aps_str_from_cstr("connection failed"));
@@ -1055,9 +1105,18 @@ static const uint32_t K256[64] = {
 #define SIG0(x) (ROR32(x, 7) ^ ROR32(x, 18) ^ ((x) >> 3))
 #define SIG1(x) (ROR32(x, 17) ^ ROR32(x, 19) ^ ((x) >> 10))
 
-const char* sha256_hex(const char* data) {
-    if (!data) data = "";
-    size_t len = strlen(data);
+void* sha256_hex(const void* data_ptr) {
+    if (!data_ptr) return (void*)aps_str_make("", 0);
+    const ApsStr* s = (const ApsStr*)data_ptr;
+    const char* data = NULL;
+    size_t len = 0;
+    if (s->data && s->len >= 0 && s->len < 1000000000LL) {
+        data = s->data;
+        len = (size_t)s->len;
+    } else {
+        data = (const char*)data_ptr;
+        len = strlen(data);
+    }
     uint32_t h[8] = {
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
         0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
@@ -1065,8 +1124,8 @@ const char* sha256_hex(const char* data) {
     uint64_t total_bits = (uint64_t)len * 8;
     size_t padded_len = ((len + 8) / 64 + 1) * 64;
     uint8_t* p = (uint8_t*)calloc(1, padded_len);
-    if (!p) return "";
-    memcpy(p, data, len);
+    if (!p) return (void*)aps_str_make("", 0);
+    if (len > 0 && data) memcpy(p, data, len);
     p[len] = 0x80;
     for (int i = 0; i < 8; i++) {
         p[padded_len - 1 - i] = (uint8_t)(total_bits >> (i * 8));
@@ -1089,12 +1148,12 @@ const char* sha256_hex(const char* data) {
         h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += h_val;
     }
     free(p);
-    char* hex = (char*)aps_alloc(65);
+    char hex[65];
     for (int i = 0; i < 8; i++) {
         snprintf(hex + i * 8, 9, "%08x", h[i]);
     }
     hex[64] = '\0';
-    return hex;
+    return (void*)aps_str_make(hex, 64);
 }
 
 typedef struct ApsChannel {
@@ -1796,8 +1855,15 @@ void* aps_http_response_fast(int64_t status, const void* content_type_ptr, const
 int64_t aps_str_to_i64(const void* str_ptr) {
     if (!str_ptr) return 0;
     const ApsStr* s = (const ApsStr*)str_ptr;
-    const char* p = s->data;
-    int64_t len = s->len;
+    const char* p = NULL;
+    int64_t len = 0;
+    if (s->data && s->len >= 0 && s->len < 1000000000LL) {
+        p = s->data;
+        len = s->len;
+    } else {
+        p = (const char*)str_ptr;
+        len = (int64_t)strlen(p);
+    }
     if (!p || len <= 0) return 0;
     int64_t res = 0;
     int sign = 1;
@@ -1807,7 +1873,11 @@ int64_t aps_str_to_i64(const void* str_ptr) {
     else if (i < len && p[i] == '+') { i++; }
     for (; i < len; i++) {
         if (p[i] >= '0' && p[i] <= '9') {
-            res = res * 10 + (p[i] - '0');
+            int digit = p[i] - '0';
+            if (res > (INT64_MAX - digit) / 10) {
+                return sign == 1 ? INT64_MAX : INT64_MIN;
+            }
+            res = res * 10 + digit;
         } else {
             break;
         }
@@ -1894,6 +1964,17 @@ int64_t aps_http_server_serve(int64_t port, void* dispatch_fn_ptr, int64_t max_r
 
         int nodelay = 1;
         setsockopt(client_s, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
+#ifdef _WIN32
+        DWORD srv_timeout_ms = 10000;
+        setsockopt(client_s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&srv_timeout_ms, sizeof(srv_timeout_ms));
+        setsockopt(client_s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&srv_timeout_ms, sizeof(srv_timeout_ms));
+#else
+        struct timeval srv_tv;
+        srv_tv.tv_sec = 10;
+        srv_tv.tv_usec = 0;
+        setsockopt(client_s, SOL_SOCKET, SO_RCVTIMEO, (const void*)&srv_tv, sizeof(srv_tv));
+        setsockopt(client_s, SOL_SOCKET, SO_SNDTIMEO, (const void*)&srv_tv, sizeof(srv_tv));
+#endif
 
         char buf[16384];
         int n = recv(client_s, buf, sizeof(buf) - 1, 0);
@@ -1979,20 +2060,25 @@ int64_t aps_http_server_serve(int64_t port, void* dispatch_fn_ptr, int64_t max_r
             "Server: APS-Vortex/1.0\r\n"
             "\r\n", status_text, (int)ct_len, ct_str, (long long)b_len);
 
-        int total_len = hdr_len + (int)b_len;
-        char* out_buf = (char*)malloc((size_t)total_len + 1);
-        if (out_buf) {
-            memcpy(out_buf, hdr_buf, (size_t)hdr_len);
-            if (b_len > 0 && b_data) {
-                memcpy(out_buf + hdr_len, b_data, (size_t)b_len);
+        if (b_len < 0) b_len = 0;
+        if (hdr_len < 0) hdr_len = 0;
+        int64_t total_len = (int64_t)hdr_len + b_len;
+        if (total_len > 0 && total_len < 1024 * 1024 * 64) {
+            char* out_buf = (char*)malloc((size_t)total_len + 1);
+            if (out_buf) {
+                memcpy(out_buf, hdr_buf, (size_t)hdr_len);
+                if (b_len > 0 && b_data) {
+                    memcpy(out_buf + hdr_len, b_data, (size_t)b_len);
+                }
+                int64_t total_sent = 0;
+                while (total_sent < total_len) {
+                    int chunk = (total_len - total_sent > 65536) ? 65536 : (int)(total_len - total_sent);
+                    int sent = send(client_s, out_buf + total_sent, chunk, 0);
+                    if (sent <= 0) break;
+                    total_sent += sent;
+                }
+                free(out_buf);
             }
-            int total_sent = 0;
-            while (total_sent < total_len) {
-                int sent = send(client_s, out_buf + total_sent, total_len - total_sent, 0);
-                if (sent <= 0) break;
-                total_sent += sent;
-            }
-            free(out_buf);
         }
 
         closesocket(client_s);
@@ -2035,8 +2121,36 @@ void* aps_http_client_request(const void* method_ptr, const void* host_ptr, int6
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr(host);
     addr.sin_port = htons((uint16_t)port);
+
+    unsigned long ip = inet_addr(host);
+    if (ip == INADDR_NONE && strcmp(host, "255.255.255.255") != 0) {
+        struct hostent* he = gethostbyname(host);
+        if (he && he->h_addr_list && he->h_addr_list[0]) {
+            memcpy(&addr.sin_addr, he->h_addr_list[0], sizeof(addr.sin_addr));
+        } else {
+            closesocket(s);
+            ApsHttpResponse* err_resp = (ApsHttpResponse*)aps_alloc(sizeof(ApsHttpResponse));
+            err_resp->status_code = -1;
+            err_resp->content_type = aps_str_make("text/plain", 10);
+            err_resp->body = aps_str_make("host resolution failed", 22);
+            return (void*)err_resp;
+        }
+    } else {
+        addr.sin_addr.s_addr = ip;
+    }
+
+#ifdef _WIN32
+    DWORD cli_timeout_ms = 10000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&cli_timeout_ms, sizeof(cli_timeout_ms));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&cli_timeout_ms, sizeof(cli_timeout_ms));
+#else
+    struct timeval cli_tv;
+    cli_tv.tv_sec = 10;
+    cli_tv.tv_usec = 0;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const void*)&cli_tv, sizeof(cli_tv));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const void*)&cli_tv, sizeof(cli_tv));
+#endif
 
     if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
         closesocket(s);
@@ -2047,17 +2161,33 @@ void* aps_http_client_request(const void* method_ptr, const void* host_ptr, int6
         return (void*)err_resp;
     }
 
-    char req_buf[4096];
-    int req_len = snprintf(req_buf, sizeof(req_buf),
+    char req_hdr[1024];
+    int req_hdr_len = snprintf(req_hdr, sizeof(req_hdr),
         "%s %s HTTP/1.1\r\n"
         "Host: %s:%lld\r\n"
         "Content-Length: %lld\r\n"
         "Content-Type: application/json\r\n"
         "Connection: close\r\n"
-        "\r\n"
-        "%.*s", m, path, host, (long long)port, (long long)body_len, (int)body_len, body);
+        "\r\n", m, path, host, (long long)port, (long long)body_len);
 
-    send(s, req_buf, req_len, 0);
+    if (req_hdr_len > 0) {
+        int sent_h = 0;
+        while (sent_h < req_hdr_len) {
+            int n = send(s, req_hdr + sent_h, req_hdr_len - sent_h, 0);
+            if (n <= 0) break;
+            sent_h += n;
+        }
+    }
+
+    if (body_len > 0 && body) {
+        int64_t sent_b = 0;
+        while (sent_b < body_len) {
+            int chunk = (body_len - sent_b > 65536) ? 65536 : (int)(body_len - sent_b);
+            int n = send(s, body + sent_b, chunk, 0);
+            if (n <= 0) break;
+            sent_b += n;
+        }
+    }
 
     char resp_buf[16384];
     int total_read = 0;

@@ -1407,7 +1407,6 @@ impl Parser {
                         let is_builtin = matches!(
                             name.as_str(),
                             "Vec"
-                                | "HashMap"
                                 | "HashSet"
                                 | "Option"
                                 | "Result"
@@ -1452,7 +1451,6 @@ impl Parser {
                         let is_builtin = matches!(
                             name.as_str(),
                             "Vec"
-                                | "HashMap"
                                 | "HashSet"
                                 | "Option"
                                 | "Result"

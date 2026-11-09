@@ -597,7 +597,7 @@ declare i64 @aps_str_to_i64(ptr) readonly willreturn nounwind
 declare i64 @aps_http_server_serve(i64, ptr, i64)
 declare ptr @aps_http_client_request(ptr, ptr, i64, ptr, ptr)
 declare i64 @llvm.expect.i64(i64, i64)
-declare ptr @aps_map_new()
+declare ptr @aps_map_new(i64)
 declare void @aps_map_insert(ptr, i64, i64)
 declare ptr @aps_map_get(ptr, i64)
 declare i64 @aps_map_len(ptr)
@@ -1657,6 +1657,17 @@ declare ptr @aps_tcp_stream_flush(i64)
                 "bool" => Some(Type::Bool),
                 "char" => Some(Type::Char),
                 "String" | "str" => Some(Type::String),
+                "HashMap" => {
+                    let k = args
+                        .get(0)
+                        .and_then(|a| self.resolve_basic_type_ast(a))
+                        .unwrap_or(Type::String);
+                    let v = args
+                        .get(1)
+                        .and_then(|a| self.resolve_basic_type_ast(a))
+                        .unwrap_or(Type::I64);
+                    Some(Type::HashMap(Box::new(k), Box::new(v)))
+                }
                 "Vec" => {
                     let inner = args
                         .first()
@@ -3295,6 +3306,14 @@ declare ptr @aps_tcp_stream_flush(i64)
                 return (r, Type::String);
             }
         }
+        if fn_name == "sha256_hex" {
+            if let Some(first) = args.first() {
+                let (va, _) = self.emit_expr(&first.expr, out, locals, None);
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call ptr @sha256_hex(ptr {})\n", r, va));
+                return (r, Type::String);
+            }
+        }
         if fn_name == "parse_i64" || fn_name == "str_to_i64" {
             if let Some(first) = args.first() {
                 let (va, _) = self.emit_expr(&first.expr, out, locals, None);
@@ -3644,10 +3663,34 @@ declare ptr @aps_tcp_stream_flush(i64)
                     ));
                     return (vec_ptr, Type::Vec(Box::new(Type::I64)));
                 }
-                if tname == "HashMap" && (method == "new" || method == "with_capacity") {
+                if (tname == "HashMap" || tname.starts_with("HashMap$")) && (method == "new" || method == "with_capacity") {
+                    let (k_ty, v_ty) = if tname.starts_with("HashMap$") {
+                        let parts: Vec<&str> = tname.split('$').collect();
+                        let k = parts.get(1).map(|t| match *t {
+                            "String" | "str" => Type::String,
+                            "f32" | "f64" => Type::F64,
+                            "bool" => Type::Bool,
+                            "char" => Type::Char,
+                            _ => Type::I64,
+                        }).unwrap_or(Type::String);
+                        let v = parts.get(2).map(|t| match *t {
+                            "String" | "str" => Type::String,
+                            "f32" | "f64" => Type::F64,
+                            "bool" => Type::Bool,
+                            "char" => Type::Char,
+                            _ => Type::I64,
+                        }).unwrap_or(Type::I64);
+                        (k, v)
+                    } else {
+                        (Type::String, Type::I64)
+                    };
+                    let is_str_key = match &k_ty {
+                        Type::String | Type::Str => 1i64,
+                        _ => 0i64,
+                    };
                     let m = self.next_reg();
-                    out.push_str(&format!("  {} = call ptr @aps_map_new()\n", m));
-                    return (m, Type::HashMap(Box::new(Type::String), Box::new(Type::I64)));
+                    out.push_str(&format!("  {} = call ptr @aps_map_new(i64 {})\n", m, is_str_key));
+                    return (m, Type::HashMap(Box::new(k_ty), Box::new(v_ty)));
                 }
                 if tname == "AtomicI64" && method == "new" {
                     let init_val = if let Some(first) = args.first() {
