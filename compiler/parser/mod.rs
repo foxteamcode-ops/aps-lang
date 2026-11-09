@@ -1344,6 +1344,7 @@ impl Parser {
                     if !gen_args.is_empty()
                         && (self.is_struct_init_ahead()
                             || self.peek_kind() == &TokenKind::LParen
+                            || self.peek_kind() == &TokenKind::Dot
                             || self.peek_kind() == &TokenKind::ColonColon)
                     {
                         // Valid generic type or function instantiation

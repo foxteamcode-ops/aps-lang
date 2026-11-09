@@ -1217,9 +1217,7 @@ declare ptr @aps_tcp_stream_flush(i64)
 
                     out.push_str(&format!("  br label %{}\n", cond_lbl));
                     out.push_str(&format!("{}:\n", cond_lbl));
-                    let (cond_val, _) = self.emit_expr(cond, out, locals, Some(&Type::Bool));
-                    let cond_i1 = self.next_reg();
-                    out.push_str(&format!("  {} = icmp ne i64 {}, 0\n", cond_i1, cond_val));
+                    let cond_i1 = self.emit_cond(cond, out, locals);
                     out.push_str(&format!(
                         "  br i1 {}, label %{}, label %{}\n",
                         cond_i1, body_lbl, end_lbl
@@ -1698,6 +1696,109 @@ declare ptr @aps_tcp_stream_flush(i64)
         }
     }
 
+    fn emit_cond(
+        &mut self,
+        cond: &Expr,
+        out: &mut String,
+        locals: &mut HashMap<String, LocalVar>,
+    ) -> String {
+        match &cond.kind {
+            ExprKind::Binary { op, left, right } => match op {
+                BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                    let (lv, lt) = self.emit_expr(left, out, locals, None);
+                    let (rv, _) = self.emit_expr(right, out, locals, Some(&lt));
+                    let is_float = matches!(lt.strip_region(), Type::F64 | Type::F32);
+                    let is_str = matches!(lt.strip_region(), Type::String | Type::Str);
+                    if is_str {
+                        let eq = self.next_reg();
+                        out.push_str(&format!(
+                            "  {} = call i64 @aps_str_eq(ptr {}, ptr {})\n",
+                            eq, lv, rv
+                        ));
+                        let cmp_i1 = self.next_reg();
+                        let cmp_kw = if *op == BinOp::Ne { "eq" } else { "ne" };
+                        out.push_str(&format!("  {} = icmp {} i64 {}, 0\n", cmp_i1, cmp_kw, eq));
+                        cmp_i1
+                    } else if is_float {
+                        let cmp_op = match op {
+                            BinOp::Eq => "oeq",
+                            BinOp::Ne => "une",
+                            BinOp::Lt => "olt",
+                            BinOp::Le => "ole",
+                            BinOp::Gt => "ogt",
+                            BinOp::Ge => "oge",
+                            _ => "oeq",
+                        };
+                        let cmp_i1 = self.next_reg();
+                        out.push_str(&format!(
+                            "  {} = fcmp {} double {}, {}\n",
+                            cmp_i1, cmp_op, lv, rv
+                        ));
+                        cmp_i1
+                    } else {
+                        let cmp_op = match op {
+                            BinOp::Eq => "eq",
+                            BinOp::Ne => "ne",
+                            BinOp::Lt => "slt",
+                            BinOp::Le => "sle",
+                            BinOp::Gt => "sgt",
+                            BinOp::Ge => "sge",
+                            _ => "eq",
+                        };
+                        let cmp_i1 = self.next_reg();
+                        out.push_str(&format!(
+                            "  {} = icmp {} i64 {}, {}\n",
+                            cmp_i1, cmp_op, lv, rv
+                        ));
+                        cmp_i1
+                    }
+                }
+                BinOp::And => {
+                    let c1 = self.emit_cond(left, out, locals);
+                    let c2 = self.emit_cond(right, out, locals);
+                    let r = self.next_reg();
+                    out.push_str(&format!("  {} = and i1 {}, {}\n", r, c1, c2));
+                    r
+                }
+                BinOp::Or => {
+                    let c1 = self.emit_cond(left, out, locals);
+                    let c2 = self.emit_cond(right, out, locals);
+                    let r = self.next_reg();
+                    out.push_str(&format!("  {} = or i1 {}, {}\n", r, c1, c2));
+                    r
+                }
+                _ => {
+                    let (cond_v, _) = self.emit_expr(cond, out, locals, Some(&Type::Bool));
+                    let cond_i1 = self.next_reg();
+                    out.push_str(&format!("  {} = icmp ne i64 {}, 0\n", cond_i1, cond_v));
+                    cond_i1
+                }
+            },
+            ExprKind::Unary {
+                op: UnaryOp::Not,
+                expr: inner,
+            } => {
+                let c = self.emit_cond(inner, out, locals);
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = xor i1 {}, true\n", r, c));
+                r
+            }
+            ExprKind::BoolLit(b) => {
+                if *b {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                }
+            }
+            _ => {
+                let (cond_v, _) = self.emit_expr(cond, out, locals, Some(&Type::Bool));
+                let cond_i1 = self.next_reg();
+                out.push_str(&format!("  {} = icmp ne i64 {}, 0\n", cond_i1, cond_v));
+                cond_i1
+            }
+        }
+    }
+
     fn emit_expr(
         &mut self,
         expr: &Expr,
@@ -2000,13 +2101,13 @@ declare ptr @aps_tcp_stream_flush(i64)
                             if is_known_non_zero {
                                 out.push_str(&format!("  {} = sdiv i64 {}, {}\n", res, lv, rv));
                             } else {
-                                let is_zero = self.next_reg();
+                                let is_non_zero = self.next_reg();
                                 let div_ok = self.next_label("div_ok");
                                 let div_fail = self.next_label("div_fail");
                                 let err_str = self.intern_string("attempt to divide by zero");
                                 let file_str = self.intern_string(&expr.span.file);
-                                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, rv));
-                                out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_zero, div_fail, div_ok));
+                                out.push_str(&format!("  {} = icmp ne i64 {}, 0\n", is_non_zero, rv));
+                                out.push_str(&format!("  br i1 {}, label %{}, label %{}, !prof !1\n", is_non_zero, div_ok, div_fail));
                                 out.push_str(&format!("{}:\n", div_fail));
                                 out.push_str(&format!(
                                     "  call void @aps_panic(ptr {}, ptr {}, i64 {})\n  unreachable\n",
@@ -2025,13 +2126,13 @@ declare ptr @aps_tcp_stream_flush(i64)
                             if is_known_non_zero {
                                 out.push_str(&format!("  {} = srem i64 {}, {}\n", res, lv, rv));
                             } else {
-                                let is_zero = self.next_reg();
+                                let is_non_zero = self.next_reg();
                                 let rem_ok = self.next_label("rem_ok");
                                 let rem_fail = self.next_label("rem_fail");
                                 let err_str = self.intern_string("attempt to calculate remainder with zero divisor");
                                 let file_str = self.intern_string(&expr.span.file);
-                                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, rv));
-                                out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_zero, rem_fail, rem_ok));
+                                out.push_str(&format!("  {} = icmp ne i64 {}, 0\n", is_non_zero, rv));
+                                out.push_str(&format!("  br i1 {}, label %{}, label %{}, !prof !1\n", is_non_zero, rem_ok, rem_fail));
                                 out.push_str(&format!("{}:\n", rem_fail));
                                 out.push_str(&format!(
                                     "  call void @aps_panic(ptr {}, ptr {}, i64 {})\n  unreachable\n",
@@ -2290,9 +2391,7 @@ declare ptr @aps_tcp_stream_flush(i64)
                 then_block,
                 else_branch,
             } => {
-                let (cond_v, _) = self.emit_expr(cond, out, locals, Some(&Type::Bool));
-                let cond_i1 = self.next_reg();
-                out.push_str(&format!("  {} = icmp ne i64 {}, 0\n", cond_i1, cond_v));
+                let cond_i1 = self.emit_cond(cond, out, locals);
                 let then_lbl = self.next_label("if_then");
                 let else_lbl = self.next_label("if_else");
                 let merge_lbl = self.next_label("if_merge");
@@ -2300,7 +2399,7 @@ declare ptr @aps_tcp_stream_flush(i64)
                 let res_ty = expected_ty.cloned()
                     .or_else(|| self.infer_block_type(then_block, locals))
                     .or_else(|| else_branch.as_ref().and_then(|eb| self.infer_expr_type(eb, locals)))
-                    .unwrap_or(Type::I64);
+                    .unwrap_or(Type::Void);
                 let res_llvm = Self::llvm_val_type(&res_ty);
                 let res_slot = if res_llvm != "void" {
                     let slot = self.emit_alloca(res_llvm);
@@ -2337,7 +2436,9 @@ declare ptr @aps_tcp_stream_flush(i64)
                 );
                 if !t_ret {
                     if let Some(v) = tv {
-                        self.emit_store_with_coercion(&v, Self::llvm_val_type(&tty), res_llvm, &res_slot, out);
+                        if res_llvm != "void" {
+                            self.emit_store_with_coercion(&v, Self::llvm_val_type(&tty), res_llvm, &res_slot, out);
+                        }
                     }
                     out.push_str(&format!("  br label %{}\n", merge_lbl));
                 }
@@ -2360,12 +2461,16 @@ declare ptr @aps_tcp_stream_flush(i64)
                         e_ret = er;
                         if !e_ret {
                             if let Some(v) = ev {
-                                self.emit_store_with_coercion(&v, Self::llvm_val_type(&ety), res_llvm, &res_slot, out);
+                                if res_llvm != "void" {
+                                    self.emit_store_with_coercion(&v, Self::llvm_val_type(&ety), res_llvm, &res_slot, out);
+                                }
                             }
                         }
                     } else {
                         let (ev, ety) = self.emit_expr(eb, out, locals, Some(&res_ty));
-                        self.emit_store_with_coercion(&ev, Self::llvm_val_type(&ety), res_llvm, &res_slot, out);
+                        if res_llvm != "void" {
+                            self.emit_store_with_coercion(&ev, Self::llvm_val_type(&ety), res_llvm, &res_slot, out);
+                        }
                     }
                 }
                 if !e_ret {
@@ -4182,7 +4287,11 @@ declare ptr @aps_tcp_stream_flush(i64)
 
         if need_recompile_rt {
             let mut rt_cmd = Command::new(&clang);
-            rt_cmd.arg(opt_flag).arg("-c").arg(&rt_path).arg("-o").arg(&rt_obj_path);
+            rt_cmd.arg(opt_flag);
+            if opt_level >= 2 {
+                rt_cmd.arg("-flto").arg("-march=native");
+            }
+            rt_cmd.arg("-c").arg(&rt_path).arg("-o").arg(&rt_obj_path);
             if std::env::var("APS_ALLOC_STATS").map(|v| v == "1").unwrap_or(false) {
                 rt_cmd.arg("-DAPS_ALLOC_STATS");
             }

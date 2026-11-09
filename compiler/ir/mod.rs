@@ -31,7 +31,7 @@ impl ApsIrModule {
             .functions
             .into_iter()
             .map(|f| {
-                let inline_hint = f.name != "main" && f.body.stmts.len() <= 4;
+                let inline_hint = f.name != "main" && !f.is_async && f.body.stmts.len() <= 24;
                 ApsIrFunction {
                     name: f.name,
                     params: f.params,
