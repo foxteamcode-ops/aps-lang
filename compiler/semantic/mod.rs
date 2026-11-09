@@ -112,6 +112,10 @@ impl SemanticAnalyzer {
             ("likely", vec![("cond", Capability::Value, Type::Bool)], Type::Bool),
             ("unlikely", vec![("cond", Capability::Value, Type::Bool)], Type::Bool),
             ("http_response_fast", vec![("status", Capability::Value, Type::I64), ("content_type", Capability::Read, Type::String), ("body", Capability::Read, Type::String)], Type::String),
+            ("parse_i64", vec![("s", Capability::Read, Type::String)], Type::I64),
+            ("str_to_i64", vec![("s", Capability::Read, Type::String)], Type::I64),
+            ("http_server_serve", vec![("port", Capability::Value, Type::I64), ("dispatch_fn", Capability::Value, Type::Unknown), ("max_requests", Capability::Value, Type::I64)], Type::I64),
+            ("http_client_request", vec![("method", Capability::Read, Type::String), ("host", Capability::Read, Type::String), ("port", Capability::Value, Type::I64), ("path", Capability::Read, Type::String), ("body", Capability::Read, Type::String)], Type::Struct("Response".to_string(), Vec::new())),
             ("promote", vec![("val", Capability::Read, Type::Unknown)], Type::Unknown),
             ("region_set_quota", vec![("region", Capability::Read, Type::Unknown), ("max_bytes", Capability::Value, Type::I64)], Type::Void),
         ];
@@ -998,7 +1002,7 @@ impl SemanticAnalyzer {
                         };
                     }
                     Type::String | Type::Str => match method.as_str() {
-                        "len" | "byte_len" | "char_count" => return Type::I64,
+                        "len" | "byte_len" | "char_count" | "to_i64" => return Type::I64,
                         "is_empty" | "contains" | "starts_with" | "ends_with" => {
                             return Type::Bool
                         }

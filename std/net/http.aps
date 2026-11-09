@@ -1,0 +1,209 @@
+// ============================================================================
+// Модуль: std.net.http (APS Vortex Web Framework)
+// Описание: Высокопроизводительный асинхронный веб-фреймворк для APS (аналог Axum + Tokio).
+// ============================================================================
+
+module std.net.http
+
+/// Структура входящего HTTP-запроса
+pub struct Request {
+    pub method: String
+    pub path: String
+    pub query: String
+    pub body: String
+    pub client_ip: String
+}
+
+impl Request {
+    /// Извлечение строкового суффикса/параметра пути по заданному префиксу
+    /// Например: для пути "/users/101" и префикса "/users/" вернёт "101"
+    pub fn param(read self, prefix: String) -> String {
+        let p = self.path
+        if p.starts_with(prefix) {
+            let plen = prefix.len()
+            let total = p.len()
+            if total > plen {
+                return p.slice(plen, total - plen)
+            }
+        }
+        return ""
+    }
+
+    /// Извлечение числового параметра пути (i64)
+    pub fn param_i64(read self, prefix: String) -> i64 {
+        let p_str = self.param(prefix)
+        return p_str.to_i64()
+    }
+}
+
+/// Структура исходящего HTTP-ответа
+pub struct Response {
+    pub status_code: i64
+    pub content_type: String
+    pub body: String
+}
+
+impl Response {
+    pub fn new(status: i64, content_type: String, body: String) -> Response {
+        return Response {
+            status_code: status,
+            content_type: content_type,
+            body: body
+        }
+    }
+
+    pub fn ok(body: String) -> Response {
+        return Response {
+            status_code: 200,
+            content_type: "text/plain",
+            body: body
+        }
+    }
+
+    pub fn json(json_str: String) -> Response {
+        return Response {
+            status_code: 200,
+            content_type: "application/json",
+            body: json_str
+        }
+    }
+
+    pub fn html(html_str: String) -> Response {
+        return Response {
+            status_code: 200,
+            content_type: "text/html",
+            body: html_str
+        }
+    }
+
+    pub fn status(code: i64) -> Response {
+        return Response {
+            status_code: code,
+            content_type: "application/json",
+            body: ""
+        }
+    }
+
+    pub fn not_found(msg: String) -> Response {
+        return Response {
+            status_code: 404,
+            content_type: "application/json",
+            body: f"{\"error\":\"{msg}\"}"
+        }
+    }
+
+    pub fn bad_request(msg: String) -> Response {
+        return Response {
+            status_code: 400,
+            content_type: "application/json",
+            body: f"{\"error\":\"{msg}\"}"
+        }
+    }
+
+    pub fn internal_error(msg: String) -> Response {
+        return Response {
+            status_code: 500,
+            content_type: "application/json",
+            body: f"{\"error\":\"{msg}\"}"
+        }
+    }
+}
+
+/// Отдельный маршрут роутера
+pub struct Route {
+    pub method: String
+    pub path: String
+    pub handler: fn(read Request) -> Response
+}
+
+/// Роутер веб-приложения Vortex
+pub struct Router {
+    pub routes: Vec<Route>
+}
+
+impl Router {
+    pub fn new() -> Router {
+        return Router {
+            routes: Vec<Route>.new()
+        }
+    }
+
+    pub fn get(write self, path: String, handler: fn(read Request) -> Response) -> Router {
+        self.routes.push(Route {
+            method: "GET",
+            path: path,
+            handler: handler
+        })
+        return self
+    }
+
+    pub fn post(write self, path: String, handler: fn(read Request) -> Response) -> Router {
+        self.routes.push(Route {
+            method: "POST",
+            path: path,
+            handler: handler
+        })
+        return self
+    }
+
+    pub fn put(write self, path: String, handler: fn(read Request) -> Response) -> Router {
+        self.routes.push(Route {
+            method: "PUT",
+            path: path,
+            handler: handler
+        })
+        return self
+    }
+
+    pub fn delete(write self, path: String, handler: fn(read Request) -> Response) -> Router {
+        self.routes.push(Route {
+            method: "DELETE",
+            path: path,
+            handler: handler
+        })
+        return self
+    }
+
+    /// Диспетчеризация входящего запроса по зарегистрированным маршрутам
+    pub fn dispatch(read self, req: read Request) -> Response {
+        for i in 0..self.routes.len() {
+            let r = self.routes.get(i)
+            if r.method == req.method {
+                // Точное совпадение пути
+                if r.path == req.path {
+                    let h = r.handler
+                    return h(read req)
+                }
+                // Совпадение с префиксом параметра пути, например "/orders/:" matches "/orders/101"
+                if r.path.ends_with("/:") {
+                    let base_prefix = r.path.slice(0, r.path.len() - 1)
+                    if req.path.starts_with(base_prefix) {
+                        let h = r.handler
+                        return h(read req)
+                    }
+                }
+            }
+        }
+        return Response.not_found("маршрут не найден")
+    }
+
+    /// Запуск высокопроизводительного нативного сервера
+    pub fn listen(read self, port: i64) -> i64 {
+        return http_server_serve(port, self.dispatch, 0)
+    }
+
+    /// Запуск сервера на обработку заданного количества запросов (для тестов и замеров)
+    pub fn listen_requests(read self, port: i64, max_requests: i64) -> i64 {
+        return http_server_serve(port, self.dispatch, max_requests)
+    }
+}
+
+/// Утилита выполнения исходящего HTTP GET запроса
+pub fn http_get(host: String, port: i64, path: String) -> Response {
+    return http_client_request("GET", host, port, path, "")
+}
+
+/// Утилита выполнения исходящего HTTP POST запроса
+pub fn http_post(host: String, port: i64, path: String, body: String) -> Response {
+    return http_client_request("POST", host, port, path, body)
+}

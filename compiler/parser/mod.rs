@@ -1214,6 +1214,11 @@ impl Parser {
 
         while let Some(c) = chars.next() {
             if c == '{' {
+                if chars.peek() == Some(&'{') {
+                    chars.next();
+                    current_lit.push('{');
+                    continue;
+                }
                 if !current_lit.is_empty() {
                     parts.push(Expr {
                         kind: ExprKind::StringLit(std::mem::take(&mut current_lit)),
@@ -1244,6 +1249,13 @@ impl Parser {
                     let sub_expr = sub_parser.parse_expr();
                     parts.push(sub_expr);
                 }
+            } else if c == '}' {
+                if chars.peek() == Some(&'}') {
+                    chars.next();
+                    current_lit.push('}');
+                    continue;
+                }
+                current_lit.push('}');
             } else {
                 current_lit.push(c);
             }

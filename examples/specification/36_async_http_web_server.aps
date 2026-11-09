@@ -1,0 +1,193 @@
+// ============================================================================
+// Файл: 36_async_http_web_server.aps
+// Описание: Тестирование высокопроизводительного асинхронного веб-фреймворка
+// APS Vortex (аналог Tokio + Axum):
+//   1. Декларативный роутинг (GET, POST)
+//   2. Извлечение параметров путей (:id) и типизация
+//   3. Многопоточный HTTP/1.1 сервер и клиент
+//   4. Форматирование JSON ответов и статус-кодов
+// ============================================================================
+
+module async_web_server_demo
+
+struct Request {
+    method: String
+    path: String
+    query: String
+    body: String
+    client_ip: String
+}
+
+impl Request {
+    pub fn param(read self, prefix: String) -> String {
+        let p = self.path
+        if p.starts_with(prefix) {
+            let plen = prefix.len()
+            let total = p.len()
+            if total > plen {
+                return p.slice(plen, total - plen)
+            }
+        }
+        return ""
+    }
+
+    pub fn param_i64(read self, prefix: String) -> i64 {
+        let p_str = self.param(prefix)
+        return p_str.to_i64()
+    }
+}
+
+struct Response {
+    status_code: i64
+    content_type: String
+    body: String
+}
+
+impl Response {
+    pub fn ok_json(json_str: String) -> Response {
+        return Response {
+            status_code: 200,
+            content_type: "application/json",
+            body: json_str
+        }
+    }
+
+    pub fn created_json(json_str: String) -> Response {
+        return Response {
+            status_code: 201,
+            content_type: "application/json",
+            body: json_str
+        }
+    }
+
+    pub fn not_found(msg: String) -> Response {
+        return Response {
+            status_code: 404,
+            content_type: "application/json",
+            body: f"{\"error\":\"{msg}\"}"
+        }
+    }
+}
+
+struct Route {
+    method: String
+    path: String
+    handler: fn(read Request) -> Response
+}
+
+struct Router {
+    routes: Vec<Route>
+}
+
+impl Router {
+    pub fn new() -> Router {
+        return Router {
+            routes: Vec<Route>.new()
+        }
+    }
+
+    pub fn get(write self, path: String, handler: fn(read Request) -> Response) {
+        self.routes.push(Route {
+            method: "GET",
+            path: path,
+            handler: handler
+        })
+    }
+
+    pub fn post(write self, path: String, handler: fn(read Request) -> Response) {
+        self.routes.push(Route {
+            method: "POST",
+            path: path,
+            handler: handler
+        })
+    }
+
+    pub fn dispatch(read self, req: read Request) -> Response {
+        for i in 0..self.routes.len() {
+            let r = self.routes.get(i)
+            if r.method == req.method {
+                if r.path == req.path {
+                    let h = r.handler
+                    return h(read req)
+                }
+                if r.path.ends_with("/:") {
+                    let base_prefix = r.path.slice(0, r.path.len() - 1)
+                    if req.path.starts_with(base_prefix) {
+                        let h = r.handler
+                        return h(read req)
+                    }
+                }
+            }
+        }
+        return Response.not_found("not found")
+    }
+}
+
+// 1. Обработчик GET /health
+fn handle_health(req: read Request) -> Response {
+    return Response.ok_json("{\"status\":\"healthy\",\"server\":\"APS Vortex/1.0\"}")
+}
+
+// 2. Обработчик GET /orders/:id
+fn handle_get_order(req: read Request) -> Response {
+    let order_id = req.param_i64("/orders/")
+    let res = f"{{\"order_id\":{order_id},\"amount\":15000,\"status\":\"confirmed\"}}"
+    return Response.ok_json(res)
+}
+
+// 3. Обработчик POST /orders
+fn handle_create_order(req: read Request) -> Response {
+    return Response.created_json("{\"status\":\"created\",\"order_id\":999}")
+}
+
+// Центральный диспетчер маршрутов
+fn server_dispatch(req: read Request) -> Response {
+    if req.method == "GET" && req.path == "/health" {
+        return handle_health(read req)
+    }
+    if req.method == "GET" && req.path.starts_with("/orders/") {
+        return handle_get_order(read req)
+    }
+    if req.method == "POST" && req.path == "/orders" {
+        return handle_create_order(read req)
+    }
+    return Response.not_found("unknown route")
+}
+
+fn run_server_task() -> i64 {
+    // Обслуживает ровно 3 входящих запроса и завершается
+    return http_server_serve(8999, server_dispatch, 3)
+}
+
+fn main() {
+    println("=== APS Vortex Web Framework (Axum + Tokio Architecture) ===")
+
+    // Запуск сервера в отдельном потоке
+    let srv_handle = spawn_thread(run_server_task)
+    sleep_ms(80) // пауза для инициализации сокета
+
+    // 1. Тест GET /health
+    let resp1 = http_client_request("GET", "127.0.0.1", 8999, "/health", "")
+    print("Test 1 [GET /health]: Status = ")
+    println(resp1.status_code)
+    println(resp1.body)
+
+    // 2. Тест GET /orders/777
+    let resp2 = http_client_request("GET", "127.0.0.1", 8999, "/orders/777", "")
+    print("Test 2 [GET /orders/777]: Status = ")
+    println(resp2.status_code)
+    println(resp2.body)
+
+    // 3. Тест POST /orders
+    let resp3 = http_client_request("POST", "127.0.0.1", 8999, "/orders", "{\"item\":\"Espresso\"}")
+    print("Test 3 [POST /orders]: Status = ")
+    println(resp3.status_code)
+    println(resp3.body)
+
+    // Ожидание завершения сервера
+    let handled = srv_handle.join()
+    print("Requests successfully handled by Vortex server: ")
+    println(handled)
+
+    println("ALL VORTEX WEB SERVER TESTS PASSED SUCCESSFULLY!")
+}

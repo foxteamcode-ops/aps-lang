@@ -593,6 +593,9 @@ declare i64 @aps_str_find(ptr, ptr)
 declare i64 @aps_str_find_byte(ptr, i64)
 declare i64 @aps_str_view_eq(ptr, i64, ptr, i64)
 declare ptr @aps_http_response_fast(i64, ptr, ptr)
+declare i64 @aps_str_to_i64(ptr) readonly willreturn nounwind
+declare i64 @aps_http_server_serve(i64, ptr, i64)
+declare ptr @aps_http_client_request(ptr, ptr, i64, ptr, ptr)
 declare i64 @llvm.expect.i64(i64, i64)
 declare ptr @aps_map_new()
 declare void @aps_map_insert(ptr, i64, i64)
@@ -1860,6 +1863,11 @@ declare ptr @aps_tcp_stream_flush(i64)
                         out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", tag, tag_ptr));
                         return (eptr, Type::Enum(ename.to_string(), Vec::new()));
                     }
+                }
+                if self.fn_ret_types.contains_key(name) {
+                    let ret_ty = self.fn_ret_types.get(name).cloned().unwrap_or(Type::Void);
+                    let pcaps = self.fn_param_caps.get(name).cloned().unwrap_or_default();
+                    return (format!("@{}", name), Type::Function(pcaps, Box::new(ret_ty)));
                 }
                 ("0".to_string(), Type::I64)
             }
@@ -3287,6 +3295,36 @@ declare ptr @aps_tcp_stream_flush(i64)
                 return (r, Type::String);
             }
         }
+        if fn_name == "parse_i64" || fn_name == "str_to_i64" {
+            if let Some(first) = args.first() {
+                let (va, _) = self.emit_expr(&first.expr, out, locals, None);
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_str_to_i64(ptr {})\n", r, va));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "http_server_serve" || fn_name == "aps_http_server_serve" {
+            if args.len() >= 3 {
+                let (port_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (fn_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (max_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_http_server_serve(i64 {}, ptr {}, i64 {})\n", r, port_v, fn_v, max_v));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "http_client_request" || fn_name == "aps_http_client_request" {
+            if args.len() >= 5 {
+                let (m_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
+                let (h_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (port_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (p_v, _) = self.emit_expr(&args[3].expr, out, locals, None);
+                let (b_v, _) = self.emit_expr(&args[4].expr, out, locals, None);
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call ptr @aps_http_client_request(ptr {}, ptr {}, i64 {}, ptr {}, ptr {})\n", r, m_v, h_v, port_v, p_v, b_v));
+                return (r, Type::Struct("Response".to_string(), Vec::new()));
+            }
+        }
         if fn_name == "likely" {
             if let Some(first) = args.first() {
                 let (v, _) = self.emit_expr(&first.expr, out, locals, Some(&Type::Bool));
@@ -3767,6 +3805,11 @@ declare ptr @aps_tcp_stream_flush(i64)
                     let r = self.next_reg();
                     out.push_str(&format!("  {} = call i64 @aps_str_ends_with(ptr {}, ptr {})\n", r, recv_val, suffix_val));
                     return (r, Type::Bool);
+                }
+                if method == "to_i64" {
+                    let r = self.next_reg();
+                    out.push_str(&format!("  {} = call i64 @aps_str_to_i64(ptr {})\n", r, recv_val));
+                    return (r, Type::I64);
                 }
                 if method == "clone" {
                     return (recv_val, Type::String);

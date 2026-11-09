@@ -1791,3 +1791,300 @@ void* aps_http_response_fast(int64_t status, const void* content_type_ptr, const
     res->len = total_len;
     return (void*)res;
 }
+
+
+int64_t aps_str_to_i64(const void* str_ptr) {
+    if (!str_ptr) return 0;
+    const ApsStr* s = (const ApsStr*)str_ptr;
+    const char* p = s->data;
+    int64_t len = s->len;
+    if (!p || len <= 0) return 0;
+    int64_t res = 0;
+    int sign = 1;
+    int64_t i = 0;
+    while (i < len && (p[i] == ' ' || p[i] == '\t' || p[i] == '\r' || p[i] == '\n')) i++;
+    if (i < len && p[i] == '-') { sign = -1; i++; }
+    else if (i < len && p[i] == '+') { i++; }
+    for (; i < len; i++) {
+        if (p[i] >= '0' && p[i] <= '9') {
+            res = res * 10 + (p[i] - '0');
+        } else {
+            break;
+        }
+    }
+    return res * sign;
+}
+
+static ApsStr* aps_str_make(const char* data, int64_t len) {
+    ApsStr* res = (ApsStr*)aps_alloc(sizeof(ApsStr));
+    char* buf = (char*)aps_alloc(len + 1);
+    if (len > 0 && data) {
+        memcpy(buf, data, (size_t)len);
+    }
+    buf[len] = '\0';
+    res->data = buf;
+    res->len = len;
+    return res;
+}
+
+typedef struct {
+    ApsStr* method;
+    ApsStr* path;
+    ApsStr* query;
+    ApsStr* body;
+    ApsStr* client_ip;
+} ApsHttpRequest;
+
+typedef struct {
+    int64_t status_code;
+    ApsStr* content_type;
+    ApsStr* body;
+} ApsHttpResponse;
+
+typedef void* (*ApsHttpDispatchFn)(void* req);
+
+int64_t aps_http_server_serve(int64_t port, void* dispatch_fn_ptr, int64_t max_requests) {
+    if (port <= 0 || port > 65535 || !dispatch_fn_ptr) return -1;
+    ApsHttpDispatchFn dispatch_fn = (ApsHttpDispatchFn)dispatch_fn_ptr;
+
+#ifdef _WIN32
+    static int g_wsa_srv_inited = 0;
+    if (!g_wsa_srv_inited) {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return -1;
+        g_wsa_srv_inited = 1;
+    }
+#endif
+
+    SOCKET server_s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (server_s == INVALID_SOCKET) return -1;
+
+    int opt = 1;
+    setsockopt(server_s, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_port = htons((uint16_t)port);
+
+    if (bind(server_s, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+        closesocket(server_s);
+        return -1;
+    }
+
+    if (listen(server_s, 512) == SOCKET_ERROR) {
+        closesocket(server_s);
+        return -1;
+    }
+
+    int64_t requests_handled = 0;
+
+    while (max_requests <= 0 || requests_handled < max_requests) {
+        struct sockaddr_in client_addr;
+#ifdef _WIN32
+        int client_len = sizeof(client_addr);
+#else
+        socklen_t client_len = sizeof(client_addr);
+#endif
+        SOCKET client_s = accept(server_s, (struct sockaddr*)&client_addr, &client_len);
+        if (client_s == INVALID_SOCKET) {
+            break;
+        }
+
+        int nodelay = 1;
+        setsockopt(client_s, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
+
+        char buf[16384];
+        int n = recv(client_s, buf, sizeof(buf) - 1, 0);
+        if (n <= 0) {
+            closesocket(client_s);
+            continue;
+        }
+        buf[n] = '\0';
+
+        char method_buf[16] = "GET";
+        char full_path_buf[1024] = "/";
+        char version_buf[16] = "HTTP/1.1";
+        sscanf(buf, "%15s %1023s %15s", method_buf, full_path_buf, version_buf);
+
+        char path_buf[1024];
+        char query_buf[1024];
+        path_buf[0] = '\0';
+        query_buf[0] = '\0';
+
+        char* qmark = strchr(full_path_buf, '?');
+        if (qmark) {
+            size_t path_len = (size_t)(qmark - full_path_buf);
+            if (path_len >= sizeof(path_buf)) path_len = sizeof(path_buf) - 1;
+            memcpy(path_buf, full_path_buf, path_len);
+            path_buf[path_len] = '\0';
+            strncpy(query_buf, qmark + 1, sizeof(query_buf) - 1);
+            query_buf[sizeof(query_buf) - 1] = '\0';
+        } else {
+            strncpy(path_buf, full_path_buf, sizeof(path_buf) - 1);
+            path_buf[sizeof(path_buf) - 1] = '\0';
+        }
+
+        const char* body_start = "";
+        int64_t body_len = 0;
+        char* hdr_end = strstr(buf, "\r\n\r\n");
+        if (hdr_end) {
+            body_start = hdr_end + 4;
+            body_len = n - (int64_t)(body_start - buf);
+            if (body_len < 0) body_len = 0;
+        } else {
+            char* hdr_end_lf = strstr(buf, "\n\n");
+            if (hdr_end_lf) {
+                body_start = hdr_end_lf + 2;
+                body_len = n - (int64_t)(body_start - buf);
+                if (body_len < 0) body_len = 0;
+            }
+        }
+
+        char ip_str[64];
+        strncpy(ip_str, inet_ntoa(client_addr.sin_addr), sizeof(ip_str) - 1);
+        ip_str[sizeof(ip_str) - 1] = '\0';
+
+        ApsHttpRequest* req = (ApsHttpRequest*)aps_alloc(sizeof(ApsHttpRequest));
+        req->method = aps_str_make(method_buf, strlen(method_buf));
+        req->path = aps_str_make(path_buf, strlen(path_buf));
+        req->query = aps_str_make(query_buf, strlen(query_buf));
+        req->body = aps_str_make(body_start, body_len);
+        req->client_ip = aps_str_make(ip_str, strlen(ip_str));
+
+        ApsHttpResponse* resp = (ApsHttpResponse*)dispatch_fn((void*)req);
+
+        int64_t status = resp ? resp->status_code : 200;
+        const char* ct_str = (resp && resp->content_type && resp->content_type->data) ? resp->content_type->data : "application/json";
+        int64_t ct_len = (resp && resp->content_type) ? resp->content_type->len : (int64_t)strlen(ct_str);
+        const char* b_data = (resp && resp->body && resp->body->data) ? resp->body->data : "";
+        int64_t b_len = (resp && resp->body) ? resp->body->len : 0;
+
+        const char* status_text = "200 OK";
+        if (status == 201) status_text = "201 Created";
+        else if (status == 204) status_text = "204 No Content";
+        else if (status == 400) status_text = "400 Bad Request";
+        else if (status == 401) status_text = "401 Unauthorized";
+        else if (status == 403) status_text = "403 Forbidden";
+        else if (status == 404) status_text = "404 Not Found";
+        else if (status == 500) status_text = "500 Internal Server Error";
+
+        char hdr_buf[512];
+        int hdr_len = snprintf(hdr_buf, sizeof(hdr_buf),
+            "HTTP/1.1 %s\r\n"
+            "Content-Type: %.*s; charset=utf-8\r\n"
+            "Content-Length: %lld\r\n"
+            "Connection: close\r\n"
+            "Server: APS-Vortex/1.0\r\n"
+            "\r\n", status_text, (int)ct_len, ct_str, (long long)b_len);
+
+        int total_len = hdr_len + (int)b_len;
+        char* out_buf = (char*)malloc((size_t)total_len + 1);
+        if (out_buf) {
+            memcpy(out_buf, hdr_buf, (size_t)hdr_len);
+            if (b_len > 0 && b_data) {
+                memcpy(out_buf + hdr_len, b_data, (size_t)b_len);
+            }
+            int total_sent = 0;
+            while (total_sent < total_len) {
+                int sent = send(client_s, out_buf + total_sent, total_len - total_sent, 0);
+                if (sent <= 0) break;
+                total_sent += sent;
+            }
+            free(out_buf);
+        }
+
+        closesocket(client_s);
+        requests_handled++;
+    }
+
+    closesocket(server_s);
+    return requests_handled;
+}
+
+void* aps_http_client_request(const void* method_ptr, const void* host_ptr, int64_t port, const void* path_ptr, const void* body_ptr) {
+    const ApsStr* m_s = (const ApsStr*)method_ptr;
+    const char* m = (m_s && m_s->data) ? m_s->data : "GET";
+    const ApsStr* h_s = (const ApsStr*)host_ptr;
+    const char* host = (h_s && h_s->data) ? h_s->data : "127.0.0.1";
+    const ApsStr* p_s = (const ApsStr*)path_ptr;
+    const char* path = (p_s && p_s->data) ? p_s->data : "/";
+    const ApsStr* b_s = (const ApsStr*)body_ptr;
+    const char* body = (b_s && b_s->data) ? b_s->data : "";
+    int64_t body_len = (b_s && b_s->data) ? b_s->len : 0;
+
+#ifdef _WIN32
+    static int g_wsa_cli_inited = 0;
+    if (!g_wsa_cli_inited) {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+        g_wsa_cli_inited = 1;
+    }
+#endif
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) {
+        ApsHttpResponse* err_resp = (ApsHttpResponse*)aps_alloc(sizeof(ApsHttpResponse));
+        err_resp->status_code = -1;
+        err_resp->content_type = aps_str_make("text/plain", 10);
+        err_resp->body = aps_str_make("socket creation failed", 22);
+        return (void*)err_resp;
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = inet_addr(host);
+    addr.sin_port = htons((uint16_t)port);
+
+    if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        closesocket(s);
+        ApsHttpResponse* err_resp = (ApsHttpResponse*)aps_alloc(sizeof(ApsHttpResponse));
+        err_resp->status_code = -1;
+        err_resp->content_type = aps_str_make("text/plain", 10);
+        err_resp->body = aps_str_make("connection failed", 17);
+        return (void*)err_resp;
+    }
+
+    char req_buf[4096];
+    int req_len = snprintf(req_buf, sizeof(req_buf),
+        "%s %s HTTP/1.1\r\n"
+        "Host: %s:%lld\r\n"
+        "Content-Length: %lld\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "%.*s", m, path, host, (long long)port, (long long)body_len, (int)body_len, body);
+
+    send(s, req_buf, req_len, 0);
+
+    char resp_buf[16384];
+    int total_read = 0;
+    while (total_read < (int)sizeof(resp_buf) - 1) {
+        int r = recv(s, resp_buf + total_read, (int)sizeof(resp_buf) - 1 - total_read, 0);
+        if (r <= 0) break;
+        total_read += r;
+    }
+    resp_buf[total_read] = '\0';
+    closesocket(s);
+
+    int status_code = 200;
+    char proto[16] = {0};
+    sscanf(resp_buf, "%15s %d", proto, &status_code);
+
+    const char* b_start = "";
+    int64_t b_actual_len = 0;
+    char* hdr_delim = strstr(resp_buf, "\r\n\r\n");
+    if (hdr_delim) {
+        b_start = hdr_delim + 4;
+        b_actual_len = total_read - (int64_t)(b_start - resp_buf);
+        if (b_actual_len < 0) b_actual_len = 0;
+    }
+
+    ApsHttpResponse* client_resp = (ApsHttpResponse*)aps_alloc(sizeof(ApsHttpResponse));
+    client_resp->status_code = (int64_t)status_code;
+    client_resp->content_type = aps_str_make("application/json", 16);
+    client_resp->body = aps_str_make(b_start, b_actual_len);
+    return (void*)client_resp;
+}
