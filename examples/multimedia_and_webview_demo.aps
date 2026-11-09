@@ -1,0 +1,209 @@
+// ============================================================================
+// APS Multimedia & Advanced GUI Suite
+// Demonstrating:
+//   1. Windows 10/11 Immersive Dark Mode & Custom Background Colors
+//   2. Checkboxes & ProgressBars
+//   3. Embedded WebView (HTML5 / CSS / JavaScript)
+//   4. Native Image Display (PNG, JPG, BMP via GDI+)
+//   5. Audio & Music Playback (MP3, WAV, MIDI via WinMM)
+//   6. Video Player Control (MP4, AVI, WMV)
+//   7. Native File Open / Save Dialogs
+// Run with: .\aps.exe run examples/multimedia_and_webview_demo.aps
+// ============================================================================
+
+module multimedia_gui_demo
+
+struct Widget {
+    id: i64
+    win: i64
+}
+
+impl Widget {
+    pub fn set_text(self, text: String) {
+        gui_widget_set_text(self.win, self.id, text)
+    }
+
+    pub fn get_text(self) -> String {
+        return gui_widget_get_text(self.win, self.id)
+    }
+
+    pub fn is_checked(self) -> bool {
+        return gui_checkbox_is_checked(self.win, self.id)
+    }
+
+    pub fn set_checked(self, checked: bool) {
+        gui_checkbox_set_checked(self.win, self.id, checked)
+    }
+
+    pub fn set_progress(self, percent: i64) {
+        gui_progressbar_set_value(self.win, self.id, percent)
+    }
+
+    pub fn navigate(self, url: String) {
+        gui_webview_navigate(self.win, self.id, url)
+    }
+
+    pub fn video_play(self) {
+        gui_video_play(self.win, self.id)
+    }
+
+    pub fn video_pause(self) {
+        gui_video_pause(self.win, self.id)
+    }
+
+    pub fn video_stop(self) {
+        gui_video_stop(self.win, self.id)
+    }
+}
+
+struct Window {
+    handle: i64
+    title: String
+    width: i64
+    height: i64
+}
+
+impl Window {
+    pub fn new(title: String, width: i64, height: i64) -> Window {
+        let h = gui_window_create(title, width, height)
+        return Window {
+            handle: h,
+            title: title,
+            width: width,
+            height: height
+        }
+    }
+
+    pub fn set_dark_mode(self, enabled: bool) {
+        gui_window_set_dark_mode(self.handle, enabled)
+    }
+
+    pub fn set_bg_color(self, r: i64, g: i64, b: i64) {
+        gui_window_set_bg_color(self.handle, r, g, b)
+    }
+
+    pub fn add_button(self, text: String, x: i64, y: i64, w: i64, h: i64, on_click: fn()) -> Widget {
+        let wid = gui_add_button(self.handle, text, x, y, w, h, on_click)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_label(self, text: String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_label(self.handle, text, x, y, w, h)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_input(self, placeholder: String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_input(self.handle, placeholder, x, y, w, h)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_checkbox(self, text: String, x: i64, y: i64, w: i64, h: i64, checked: bool) -> Widget {
+        let wid = gui_add_checkbox(self.handle, text, x, y, w, h, checked)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_progressbar(self, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_progressbar(self.handle, x, y, w, h)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_image(self, path: String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_image(self.handle, path, x, y, w, h)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_webview(self, url: String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_webview(self.handle, url, x, y, w, h)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn add_video(self, path: String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_video_create(self.handle, path, x, y, w, h)
+        return Widget {
+            id: wid,
+            win: self.handle
+        }
+    }
+
+    pub fn run(self) {
+        gui_window_run(self.handle)
+    }
+
+    pub fn close(self) {
+        gui_window_close(self.handle)
+    }
+}
+
+fn on_open_file_clicked() {
+    let path = file_open_dialog("Select Image or Audio File", "All Media Files|*.png;*.jpg;*.bmp;*.mp3;*.wav;*.mp4")
+    if path.len() > 0 {
+        alert("File Selected", "Selected media file: " + path)
+    }
+}
+
+fn on_play_audio_clicked() {
+    alert("Audio Playback", "Playing audio stream via WinMM native engine...")
+    audio_play("sample.mp3")
+}
+
+fn on_exit_clicked() {
+    println("[EVENT] Exit clicked!")
+}
+
+fn main() {
+    println("=== Initializing APS Multimedia & WebView GUI Showcase ===")
+
+    // 1. Создаем современное окно 600x520
+    let win = Window.new("APS Multimedia, WebView & Advanced Design Suite", 600, 520)
+
+    // 2. Включаем темную тему оформления (Dark Mode)
+    win.set_dark_mode(true)
+
+    // 3. Заголовок
+    win.add_label("=== APS Multimedia & Modern WebView Suite ===", 30, 20, 540, 25)
+
+    // 4. Чекбокс и Прогресс-бар
+    let chk = win.add_checkbox("Enable High Performance Hardware Acceleration", 30, 55, 450, 25, true)
+    let pb = win.add_progressbar(30, 90, 540, 20)
+    pb.set_progress(75)
+
+    // 5. Встроенный WebView элемент (HTML5 / Web UI)
+    win.add_label("Embedded WebView (HTML5 / CSS / Web UI):", 30, 125, 400, 20)
+    let web = win.add_webview("https://example.com", 30, 150, 540, 200)
+
+    // 6. Кнопки управления мультимедиа
+    win.add_button("Open Media File (Dialog)", 30, 370, 250, 35, on_open_file_clicked)
+    win.add_button("Play Audio Stream (MP3/WAV)", 310, 370, 260, 35, on_play_audio_clicked)
+
+    // 7. Статус и информация
+    win.add_label("Features: WebView, GDI+ Images, WinMM Music, Video, Dark Mode", 30, 425, 540, 25)
+
+    // 8. Кнопка выхода
+    win.add_button("Exit Showcase", 30, 460, 540, 32, on_exit_clicked)
+
+    println("Multimedia GUI Window initialized! Running message loop...")
+    win.run()
+    win.close()
+    println("APS Multimedia GUI Showcase finished cleanly.")
+}

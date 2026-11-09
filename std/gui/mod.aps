@@ -2,7 +2,8 @@
 // Модуль: std.gui
 // Описание: Нативный фреймворк графического интерфейса Windows (GUI / Tkinter
 // эквивалент для APS). Ультра-быстрые нативные Win32 элементы управления,
-// нулевые накладные расходы на запуск (< 1 мс), минимальное потребление RAM (~2 МБ).
+// встраиваемый WebView, воспроизведение видео и аудио, поддержка изображений
+// (PNG, JPG, BMP, GIF), темная тема (Dark Mode), чекбоксы, прогрессбары и диалоги.
 // ============================================================================
 
 module std.gui
@@ -11,7 +12,12 @@ module std.gui
 pub enum WidgetType {
     Button,
     Label,
-    Input
+    Input,
+    Checkbox,
+    ProgressBar,
+    Image,
+    WebView,
+    Video
 }
 
 /// Нативный графический элемент управления (`Widget`)
@@ -30,6 +36,41 @@ impl Widget {
     /// Получает текущий текст элемента
     pub fn get_text(self) -> String {
         return gui_widget_get_text(self.win_handle, self.id)
+    }
+
+    /// Проверяет состояние чекбокса (отмечен / не отмечен)
+    pub fn is_checked(self) -> bool {
+        return gui_checkbox_is_checked(self.win_handle, self.id)
+    }
+
+    /// Устанавливает состояние чекбокса
+    pub fn set_checked(self, checked: bool) {
+        gui_checkbox_set_checked(self.win_handle, self.id, checked)
+    }
+
+    /// Устанавливает значение прогресс-бара (0 .. 100 %)
+    pub fn set_progress(self, percent: i64) {
+        gui_progressbar_set_value(self.win_handle, self.id, percent)
+    }
+
+    /// Переходит по URL или загружает новую страницу в WebView
+    pub fn navigate(self, url: read String) {
+        gui_webview_navigate(self.win_handle, self.id, read url)
+    }
+
+    /// Запускает воспроизведение видео
+    pub fn video_play(self) {
+        gui_video_play(self.win_handle, self.id)
+    }
+
+    /// Ставит видео на паузу
+    pub fn video_pause(self) {
+        gui_video_pause(self.win_handle, self.id)
+    }
+
+    /// Останавливает видео
+    pub fn video_stop(self) {
+        gui_video_stop(self.win_handle, self.id)
     }
 }
 
@@ -51,6 +92,16 @@ impl Window {
             width: width,
             height: height
         }
+    }
+
+    /// Включает или выключает темную тему заголовка Windows (Immersive Dark Mode)
+    pub fn set_dark_mode(self, enabled: bool) {
+        gui_window_set_dark_mode(self.handle, enabled)
+    }
+
+    /// Устанавливает фоновый цвет окна (RGB)
+    pub fn set_bg_color(self, r: i64, g: i64, b: i64) {
+        gui_window_set_bg_color(self.handle, r, g, b)
     }
 
     /// Добавляет кнопку с обработчиком клика
@@ -83,6 +134,56 @@ impl Window {
         }
     }
 
+    /// Добавляет чекбокс (флажок с возможностью выбора)
+    pub fn add_checkbox(self, text: read String, x: i64, y: i64, w: i64, h: i64, checked: bool) -> Widget {
+        let wid = gui_add_checkbox(self.handle, read text, x, y, w, h, checked)
+        return Widget {
+            id: wid,
+            win_handle: self.handle,
+            widget_type: WidgetType.Checkbox
+        }
+    }
+
+    /// Добавляет индикатор выполнения (ProgressBar 0-100%)
+    pub fn add_progressbar(self, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_progressbar(self.handle, x, y, w, h)
+        return Widget {
+            id: wid,
+            win_handle: self.handle,
+            widget_type: WidgetType.ProgressBar
+        }
+    }
+
+    /// Добавляет изображение (PNG, JPG, BMP, GIF, ICO)
+    pub fn add_image(self, path: read String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_image(self.handle, read path, x, y, w, h)
+        return Widget {
+            id: wid,
+            win_handle: self.handle,
+            widget_type: WidgetType.Image
+        }
+    }
+
+    /// Добавляет встраиваемый веб-компонент WebView (HTML5/CSS3/JS)
+    pub fn add_webview(self, url: read String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_add_webview(self.handle, read url, x, y, w, h)
+        return Widget {
+            id: wid,
+            win_handle: self.handle,
+            widget_type: WidgetType.WebView
+        }
+    }
+
+    /// Добавляет встроенный видеоплеер (MP4, AVI, WMV)
+    pub fn add_video(self, path: read String, x: i64, y: i64, w: i64, h: i64) -> Widget {
+        let wid = gui_video_create(self.handle, read path, x, y, w, h)
+        return Widget {
+            id: wid,
+            win_handle: self.handle,
+            widget_type: WidgetType.Video
+        }
+    }
+
     /// Запускает цикл обработки сообщений Windows (Message Loop)
     pub fn run(self) {
         gui_window_run(self.handle)
@@ -92,6 +193,36 @@ impl Window {
     pub fn close(self) {
         gui_window_close(self.handle)
     }
+}
+
+/// Воспроизводит аудиофайл (MP3, WAV, MIDI)
+pub fn audio_play(path: read String) {
+    gui_audio_play(read path)
+}
+
+/// Ставит воспроизведение аудио на паузу
+pub fn audio_pause() {
+    gui_audio_pause()
+}
+
+/// Возобновляет воспроизведение аудио
+pub fn audio_resume() {
+    gui_audio_resume()
+}
+
+/// Останавливает воспроизведение аудио
+pub fn audio_stop() {
+    gui_audio_stop()
+}
+
+/// Открывает системный диалог выбора файла Windows (Open File Dialog)
+pub fn file_open_dialog(title: read String, filter: read String) -> String {
+    return gui_file_open(read title, read filter)
+}
+
+/// Открывает системный диалог сохранения файла Windows (Save File Dialog)
+pub fn file_save_dialog(title: read String, filter: read String) -> String {
+    return gui_file_save(read title, read filter)
 }
 
 /// Показывает информационное всплывающее окно (MessageBox Info)

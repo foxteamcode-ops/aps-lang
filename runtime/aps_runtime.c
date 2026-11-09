@@ -20,10 +20,19 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <commctrl.h>
+#include <commdlg.h>
+#include <mmsystem.h>
+#include <dwmapi.h>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
 #else
 #include <unistd.h>
 #include <time.h>
@@ -2244,9 +2253,17 @@ typedef struct {
 #ifdef _WIN32
     HWND hwnd;
     HFONT hfont;
+    HBRUSH bg_brush;
+    COLORREF bg_color;
+    COLORREF text_color;
+    int is_dark_mode;
 #else
     void* hwnd;
     void* hfont;
+    void* bg_brush;
+    int64_t bg_color;
+    int64_t text_color;
+    int is_dark_mode;
 #endif
     int64_t width;
     int64_t height;
@@ -2275,6 +2292,36 @@ static LRESULT CALLBACK ApsGuiWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
                 }
             }
             return 0;
+        }
+        case WM_CTLCOLORSTATIC: {
+            if (win && win->bg_brush) {
+                HDC hdc = (HDC)wParam;
+                SetBkColor(hdc, win->bg_color);
+                SetTextColor(hdc, win->text_color);
+                return (LRESULT)win->bg_brush;
+            }
+            break;
+        }
+        case WM_CTLCOLOREDIT: {
+            if (win && win->is_dark_mode) {
+                HDC hdc = (HDC)wParam;
+                SetBkColor(hdc, RGB(45, 45, 45));
+                SetTextColor(hdc, RGB(240, 240, 240));
+                static HBRUSH hDarkEdit = NULL;
+                if (!hDarkEdit) hDarkEdit = CreateSolidBrush(RGB(45, 45, 45));
+                return (LRESULT)hDarkEdit;
+            }
+            break;
+        }
+        case WM_ERASEBKGND: {
+            if (win && win->bg_brush) {
+                HDC hdc = (HDC)wParam;
+                RECT rc;
+                GetClientRect(hwnd, &rc);
+                FillRect(hdc, &rc, win->bg_brush);
+                return 1;
+            }
+            break;
         }
         case WM_DESTROY: {
             if (win) win->is_closed = 1;
@@ -2562,4 +2609,498 @@ void aps_gui_error(const void* title_ptr, const void* msg_ptr) {
 #else
     fprintf(stderr, "[ERROR] %s: %s\n", title ? title : "Error", msg ? msg : "");
 #endif
+}
+
+/* ============================================================================
+ * APS Multimedia & Advanced GUI Controls (GDI+, WinMM, AtlAxWin, ComDlg32)
+ * ============================================================================ */
+
+void aps_gui_window_set_dark_mode(void* win_ptr, int64_t enabled) {
+    if (!win_ptr) return;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+#ifdef _WIN32
+    win->is_dark_mode = enabled ? 1 : 0;
+    BOOL dark = enabled ? TRUE : FALSE;
+    DwmSetWindowAttribute(win->hwnd, 20, &dark, sizeof(dark));
+    DwmSetWindowAttribute(win->hwnd, 19, &dark, sizeof(dark));
+    if (enabled) {
+        if (win->bg_brush) DeleteObject(win->bg_brush);
+        win->bg_color = RGB(32, 32, 32);
+        win->text_color = RGB(245, 245, 245);
+        win->bg_brush = CreateSolidBrush(win->bg_color);
+    } else {
+        if (win->bg_brush) { DeleteObject(win->bg_brush); win->bg_brush = NULL; }
+        win->bg_color = GetSysColor(COLOR_BTNFACE);
+        win->text_color = GetSysColor(COLOR_WINDOWTEXT);
+    }
+    InvalidateRect(win->hwnd, NULL, TRUE);
+#else
+    (void)win; (void)enabled;
+#endif
+}
+
+void aps_gui_window_set_bg_color(void* win_ptr, int64_t r, int64_t g, int64_t b) {
+    if (!win_ptr) return;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+#ifdef _WIN32
+    if (win->bg_brush) DeleteObject(win->bg_brush);
+    win->bg_color = RGB((BYTE)r, (BYTE)g, (BYTE)b);
+    win->bg_brush = CreateSolidBrush(win->bg_color);
+    InvalidateRect(win->hwnd, NULL, TRUE);
+#else
+    (void)win; (void)r; (void)g; (void)b;
+#endif
+}
+
+int64_t aps_gui_add_checkbox(void* win_ptr, const void* text_ptr, int64_t x, int64_t y, int64_t w, int64_t h, int64_t checked) {
+    if (!win_ptr) return -1;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+    const char* text = aps_to_c_str(text_ptr);
+    int64_t id = win->next_id++;
+    aps_gui_grow_widgets(win);
+
+#ifdef _WIN32
+    HWND chk = CreateWindowExA(
+        0, "BUTTON", text ? text : "",
+        WS_VISIBLE | WS_CHILD | BS_AUTOCHECKBOX | WS_TABSTOP,
+        (int)x, (int)y, (int)w, (int)h,
+        win->hwnd, (HMENU)(intptr_t)id, GetModuleHandleA(NULL), NULL
+    );
+    if (win->hfont) SendMessageA(chk, WM_SETFONT, (WPARAM)win->hfont, TRUE);
+    if (checked) SendMessageA(chk, BM_SETCHECK, BST_CHECKED, 0);
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = chk;
+    win->widgets[win->widget_count].type = 4;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#else
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = NULL;
+    win->widgets[win->widget_count].type = 4;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#endif
+    return id;
+}
+
+int64_t aps_gui_checkbox_is_checked(void* win_ptr, int64_t widget_id) {
+    if (!win_ptr) return 0;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+#ifdef _WIN32
+    for (int64_t i = 0; i < win->widget_count; i++) {
+        if (win->widgets[i].id == widget_id && win->widgets[i].hwnd) {
+            LRESULT state = SendMessageA(win->widgets[i].hwnd, BM_GETCHECK, 0, 0);
+            return state == BST_CHECKED ? 1 : 0;
+        }
+    }
+#else
+    (void)win; (void)widget_id;
+#endif
+    return 0;
+}
+
+void aps_gui_checkbox_set_checked(void* win_ptr, int64_t widget_id, int64_t checked) {
+    if (!win_ptr) return;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+#ifdef _WIN32
+    for (int64_t i = 0; i < win->widget_count; i++) {
+        if (win->widgets[i].id == widget_id && win->widgets[i].hwnd) {
+            SendMessageA(win->widgets[i].hwnd, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+            break;
+        }
+    }
+#else
+    (void)win; (void)widget_id; (void)checked;
+#endif
+}
+
+int64_t aps_gui_add_progressbar(void* win_ptr, int64_t x, int64_t y, int64_t w, int64_t h) {
+    if (!win_ptr) return -1;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+    int64_t id = win->next_id++;
+    aps_gui_grow_widgets(win);
+
+#ifdef _WIN32
+    INITCOMMONCONTROLSEX icex;
+    icex.dwSize = sizeof(icex);
+    icex.dwICC = ICC_PROGRESS_CLASS;
+    InitCommonControlsEx(&icex);
+
+    HWND pb = CreateWindowExA(
+        0, PROGRESS_CLASSA, "",
+        WS_CHILD | WS_VISIBLE,
+        (int)x, (int)y, (int)w, (int)h,
+        win->hwnd, (HMENU)(intptr_t)id, GetModuleHandleA(NULL), NULL
+    );
+    SendMessageA(pb, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
+    SendMessageA(pb, PBM_SETPOS, 0, 0);
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = pb;
+    win->widgets[win->widget_count].type = 5;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#else
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = NULL;
+    win->widgets[win->widget_count].type = 5;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#endif
+    return id;
+}
+
+void aps_gui_progressbar_set_value(void* win_ptr, int64_t widget_id, int64_t percent) {
+    if (!win_ptr) return;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+#ifdef _WIN32
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    for (int64_t i = 0; i < win->widget_count; i++) {
+        if (win->widgets[i].id == widget_id && win->widgets[i].hwnd) {
+            SendMessageA(win->widgets[i].hwnd, PBM_SETPOS, (WPARAM)percent, 0);
+            break;
+        }
+    }
+#else
+    (void)win; (void)widget_id; (void)percent;
+#endif
+}
+
+/* GDI+ Engine for PNG, JPG, GIF, BMP rendering */
+typedef int GpStatus;
+typedef struct {
+    UINT32 GdiplusVersion;
+    void* DebugEventCallback;
+    BOOL SuppressBackgroundThread;
+    BOOL SuppressExternalCodecs;
+} GdiplusStartupInput;
+
+typedef GpStatus (WINAPI *GdiplusStartupFn)(ULONG_PTR*, const GdiplusStartupInput*, void*);
+typedef GpStatus (WINAPI *GdipCreateBitmapFromFileFn)(const WCHAR*, void**);
+typedef GpStatus (WINAPI *GdipCreateHBITMAPFromBitmapFn)(void*, HBITMAP*, COLORREF);
+typedef GpStatus (WINAPI *GdipDisposeImageFn)(void*);
+
+static int g_gdiplus_inited = 0;
+static ULONG_PTR g_gdiplus_tok = 0;
+static GdipCreateBitmapFromFileFn g_pGdipCreateBitmapFromFile = NULL;
+static GdipCreateHBITMAPFromBitmapFn g_pGdipCreateHBITMAPFromBitmap = NULL;
+static GdipDisposeImageFn g_pGdipDisposeImage = NULL;
+
+static void aps_init_gdiplus(void) {
+#ifdef _WIN32
+    if (g_gdiplus_inited) return;
+    HMODULE hGdiPlus = LoadLibraryA("gdiplus.dll");
+    if (!hGdiPlus) return;
+    GdiplusStartupFn startup = (GdiplusStartupFn)GetProcAddress(hGdiPlus, "GdiplusStartup");
+    g_pGdipCreateBitmapFromFile = (GdipCreateBitmapFromFileFn)GetProcAddress(hGdiPlus, "GdipCreateBitmapFromFile");
+    g_pGdipCreateHBITMAPFromBitmap = (GdipCreateHBITMAPFromBitmapFn)GetProcAddress(hGdiPlus, "GdipCreateHBITMAPFromBitmap");
+    g_pGdipDisposeImage = (GdipDisposeImageFn)GetProcAddress(hGdiPlus, "GdipDisposeImage");
+    if (startup) {
+        GdiplusStartupInput input = { 1, NULL, FALSE, FALSE };
+        startup(&g_gdiplus_tok, &input, NULL);
+        g_gdiplus_inited = 1;
+    }
+#endif
+}
+
+int64_t aps_gui_add_image(void* win_ptr, const void* path_ptr, int64_t x, int64_t y, int64_t w, int64_t h) {
+    if (!win_ptr) return -1;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+    const char* path = aps_to_c_str(path_ptr);
+    int64_t id = win->next_id++;
+    aps_gui_grow_widgets(win);
+
+#ifdef _WIN32
+    aps_init_gdiplus();
+    HBITMAP hbm = NULL;
+    if (path && g_pGdipCreateBitmapFromFile && g_pGdipCreateHBITMAPFromBitmap) {
+        WCHAR wpath[1024];
+        MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 1024);
+        void* bitmap = NULL;
+        if (g_pGdipCreateBitmapFromFile(wpath, &bitmap) == 0 && bitmap) {
+            g_pGdipCreateHBITMAPFromBitmap(bitmap, &hbm, 0);
+            if (g_pGdipDisposeImage) g_pGdipDisposeImage(bitmap);
+        }
+    }
+    if (!hbm && path) {
+        hbm = (HBITMAP)LoadImageA(NULL, path, IMAGE_BITMAP, (int)w, (int)h, LR_LOADFROMFILE);
+    }
+
+    HWND pic = CreateWindowExA(
+        0, "STATIC", "",
+        WS_CHILD | WS_VISIBLE | SS_BITMAP,
+        (int)x, (int)y, (int)w, (int)h,
+        win->hwnd, (HMENU)(intptr_t)id, GetModuleHandleA(NULL), NULL
+    );
+    if (hbm) {
+        SendMessageA(pic, STM_SETIMAGE, (WPARAM)IMAGE_BITMAP, (LPARAM)hbm);
+    }
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = pic;
+    win->widgets[win->widget_count].type = 6;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#else
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = NULL;
+    win->widgets[win->widget_count].type = 6;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#endif
+    return id;
+}
+
+/* Embedded WebView Control via AtlAxWin */
+typedef BOOL (WINAPI *AtlAxWinInitFn)(void);
+static int g_atl_inited = 0;
+
+static void aps_init_atl(void) {
+#ifdef _WIN32
+    if (g_atl_inited) return;
+    HMODULE hAtl = LoadLibraryA("atl.dll");
+    if (!hAtl) hAtl = LoadLibraryA("atl140.dll");
+    if (hAtl) {
+        AtlAxWinInitFn initFn = (AtlAxWinInitFn)GetProcAddress(hAtl, "AtlAxWinInit");
+        if (initFn) {
+            initFn();
+            g_atl_inited = 1;
+        }
+    }
+#endif
+}
+
+int64_t aps_gui_add_webview(void* win_ptr, const void* url_ptr, int64_t x, int64_t y, int64_t w, int64_t h) {
+    if (!win_ptr) return -1;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+    const char* url = aps_to_c_str(url_ptr);
+    int64_t id = win->next_id++;
+    aps_gui_grow_widgets(win);
+
+#ifdef _WIN32
+    aps_init_atl();
+    HWND web = CreateWindowExA(
+        WS_EX_CLIENTEDGE,
+        g_atl_inited ? "AtlAxWin" : "STATIC",
+        url ? url : "about:blank",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        (int)x, (int)y, (int)w, (int)h,
+        win->hwnd, (HMENU)(intptr_t)id, GetModuleHandleA(NULL), NULL
+    );
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = web;
+    win->widgets[win->widget_count].type = 7;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#else
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = NULL;
+    win->widgets[win->widget_count].type = 7;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#endif
+    return id;
+}
+
+void aps_gui_webview_navigate(void* win_ptr, int64_t widget_id, const void* url_ptr) {
+    if (!win_ptr) return;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+    const char* url = aps_to_c_str(url_ptr);
+#ifdef _WIN32
+    for (int64_t i = 0; i < win->widget_count; i++) {
+        if (win->widgets[i].id == widget_id && win->widgets[i].hwnd) {
+            SetWindowTextA(win->widgets[i].hwnd, url ? url : "about:blank");
+            break;
+        }
+    }
+#else
+    (void)win; (void)widget_id; (void)url;
+#endif
+}
+
+/* Audio & Music Playback via MCI */
+void aps_gui_audio_play(const void* path_ptr) {
+    const char* path = aps_to_c_str(path_ptr);
+#ifdef _WIN32
+    if (!path) return;
+    mciSendStringA("close aps_audio", NULL, 0, NULL);
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd), "open \"%s\" type mpegvideo alias aps_audio", path);
+    mciSendStringA(cmd, NULL, 0, NULL);
+    mciSendStringA("play aps_audio from 0", NULL, 0, NULL);
+#else
+    printf("[AUDIO Headless] Playing '%s'\n", path ? path : "");
+#endif
+}
+
+void aps_gui_audio_pause(void) {
+#ifdef _WIN32
+    mciSendStringA("pause aps_audio", NULL, 0, NULL);
+#endif
+}
+
+void aps_gui_audio_resume(void) {
+#ifdef _WIN32
+    mciSendStringA("resume aps_audio", NULL, 0, NULL);
+#endif
+}
+
+void aps_gui_audio_stop(void) {
+#ifdef _WIN32
+    mciSendStringA("stop aps_audio", NULL, 0, NULL);
+    mciSendStringA("close aps_audio", NULL, 0, NULL);
+#endif
+}
+
+/* Video Player Control via Win32 Child Window + MCI */
+int64_t aps_gui_video_create(void* win_ptr, const void* path_ptr, int64_t x, int64_t y, int64_t w, int64_t h) {
+    if (!win_ptr) return -1;
+    ApsGuiWindow* win = (ApsGuiWindow*)win_ptr;
+    const char* path = aps_to_c_str(path_ptr);
+    int64_t id = win->next_id++;
+    aps_gui_grow_widgets(win);
+
+#ifdef _WIN32
+    HWND vid = CreateWindowExA(
+        0, "STATIC", "",
+        WS_CHILD | WS_VISIBLE,
+        (int)x, (int)y, (int)w, (int)h,
+        win->hwnd, (HMENU)(intptr_t)id, GetModuleHandleA(NULL), NULL
+    );
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = vid;
+    win->widgets[win->widget_count].type = 8;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+
+    if (path) {
+        char alias[64];
+        snprintf(alias, sizeof(alias), "aps_vid_%lld", (long long)id);
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "close %s", alias);
+        mciSendStringA(cmd, NULL, 0, NULL);
+        snprintf(cmd, sizeof(cmd), "open \"%s\" type mpegvideo alias %s", path, alias);
+        mciSendStringA(cmd, NULL, 0, NULL);
+        snprintf(cmd, sizeof(cmd), "window %s handle %lld", alias, (long long)(intptr_t)vid);
+        mciSendStringA(cmd, NULL, 0, NULL);
+        snprintf(cmd, sizeof(cmd), "put %s window at 0 0 %d %d", alias, (int)w, (int)h);
+        mciSendStringA(cmd, NULL, 0, NULL);
+        mciSendStringA(cmd, NULL, 0, NULL);
+    }
+#else
+    win->widgets[win->widget_count].id = id;
+    win->widgets[win->widget_count].hwnd = NULL;
+    win->widgets[win->widget_count].type = 8;
+    win->widgets[win->widget_count].on_click = NULL;
+    win->widget_count++;
+#endif
+    return id;
+}
+
+void aps_gui_video_play(void* win_ptr, int64_t widget_id) {
+#ifdef _WIN32
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "play aps_vid_%lld", (long long)widget_id);
+    mciSendStringA(cmd, NULL, 0, NULL);
+#else
+    (void)win_ptr; (void)widget_id;
+#endif
+}
+
+void aps_gui_video_pause(void* win_ptr, int64_t widget_id) {
+#ifdef _WIN32
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "pause aps_vid_%lld", (long long)widget_id);
+    mciSendStringA(cmd, NULL, 0, NULL);
+#else
+    (void)win_ptr; (void)widget_id;
+#endif
+}
+
+void aps_gui_video_stop(void* win_ptr, int64_t widget_id) {
+#ifdef _WIN32
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "stop aps_vid_%lld", (long long)widget_id);
+    mciSendStringA(cmd, NULL, 0, NULL);
+#else
+    (void)win_ptr; (void)widget_id;
+#endif
+}
+
+/* Native File Open & Save Dialogs */
+void* aps_gui_file_open(const void* title_ptr, const void* filter_ptr) {
+    const char* title = aps_to_c_str(title_ptr);
+    const char* filter = aps_to_c_str(filter_ptr);
+#ifdef _WIN32
+    if (getenv("APS_GUI_HEADLESS") || getenv("CI")) {
+        return (void*)aps_str_make("", 0);
+    }
+    char file_buf[2048] = {0};
+    char filter_buf[1024];
+    if (filter && strlen(filter) > 0) {
+        snprintf(filter_buf, sizeof(filter_buf), "%s", filter);
+        int flen = (int)strlen(filter_buf);
+        for (int i = 0; i < flen; i++) {
+            if (filter_buf[i] == '|') filter_buf[i] = '\0';
+        }
+        filter_buf[flen] = '\0';
+        filter_buf[flen + 1] = '\0';
+    } else {
+        memcpy(filter_buf, "All Files (*.*)\0*.*\0\0", 22);
+    }
+    OPENFILENAMEA ofn;
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.lpstrFile = file_buf;
+    ofn.nMaxFile = sizeof(file_buf);
+    ofn.lpstrFilter = filter_buf;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrTitle = title ? title : "Open File";
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+
+    if (GetOpenFileNameA(&ofn)) {
+        return (void*)aps_str_make(file_buf, (int64_t)strlen(file_buf));
+    }
+#else
+    (void)title; (void)filter;
+#endif
+    return (void*)aps_str_make("", 0);
+}
+
+void* aps_gui_file_save(const void* title_ptr, const void* filter_ptr) {
+    const char* title = aps_to_c_str(title_ptr);
+    const char* filter = aps_to_c_str(filter_ptr);
+#ifdef _WIN32
+    if (getenv("APS_GUI_HEADLESS") || getenv("CI")) {
+        return (void*)aps_str_make("", 0);
+    }
+    char file_buf[2048] = {0};
+    char filter_buf[1024];
+    if (filter && strlen(filter) > 0) {
+        snprintf(filter_buf, sizeof(filter_buf), "%s", filter);
+        int flen = (int)strlen(filter_buf);
+        for (int i = 0; i < flen; i++) {
+            if (filter_buf[i] == '|') filter_buf[i] = '\0';
+        }
+        filter_buf[flen] = '\0';
+        filter_buf[flen + 1] = '\0';
+    } else {
+        memcpy(filter_buf, "All Files (*.*)\0*.*\0\0", 22);
+    }
+    OPENFILENAMEA ofn;
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.lpstrFile = file_buf;
+    ofn.nMaxFile = sizeof(file_buf);
+    ofn.lpstrFilter = filter_buf;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrTitle = title ? title : "Save File";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+
+    if (GetSaveFileNameA(&ofn)) {
+        return (void*)aps_str_make(file_buf, (int64_t)strlen(file_buf));
+    }
+#else
+    (void)title; (void)filter;
+#endif
+    return (void*)aps_str_make("", 0);
 }

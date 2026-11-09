@@ -624,6 +624,26 @@ declare ptr @aps_gui_widget_get_text(ptr, i64)
 declare void @aps_gui_alert(ptr, ptr)
 declare i64 @aps_gui_confirm(ptr, ptr)
 declare void @aps_gui_error(ptr, ptr)
+declare void @aps_gui_window_set_dark_mode(ptr, i64)
+declare void @aps_gui_window_set_bg_color(ptr, i64, i64, i64)
+declare i64 @aps_gui_add_checkbox(ptr, ptr, i64, i64, i64, i64, i64)
+declare i64 @aps_gui_checkbox_is_checked(ptr, i64)
+declare void @aps_gui_checkbox_set_checked(ptr, i64, i64)
+declare i64 @aps_gui_add_progressbar(ptr, i64, i64, i64, i64)
+declare void @aps_gui_progressbar_set_value(ptr, i64, i64)
+declare i64 @aps_gui_add_image(ptr, ptr, i64, i64, i64, i64)
+declare i64 @aps_gui_add_webview(ptr, ptr, i64, i64, i64, i64)
+declare void @aps_gui_webview_navigate(ptr, i64, ptr)
+declare void @aps_gui_audio_play(ptr)
+declare void @aps_gui_audio_pause()
+declare void @aps_gui_audio_resume()
+declare void @aps_gui_audio_stop()
+declare i64 @aps_gui_video_create(ptr, ptr, i64, i64, i64, i64)
+declare void @aps_gui_video_play(ptr, i64)
+declare void @aps_gui_video_pause(ptr, i64)
+declare void @aps_gui_video_stop(ptr, i64)
+declare ptr @aps_gui_file_open(ptr, ptr)
+declare ptr @aps_gui_file_save(ptr, ptr)
 
 ;Tagged union / Enum standard layout: { i64 tag, i64 payload0, i64 payload1 }
 %aps.Enum = type { i64, i64, i64 }
@@ -3460,7 +3480,7 @@ declare void @aps_gui_error(ptr, ptr)
                 return (r, Type::String);
             }
         }
-        if fn_name == "gui_alert" || fn_name == "aps_gui_alert" {
+        if fn_name == "gui_alert" || fn_name == "aps_gui_alert" || fn_name == "alert" {
             if args.len() >= 2 {
                 let (t_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
                 let (m_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
@@ -3468,7 +3488,7 @@ declare void @aps_gui_error(ptr, ptr)
             }
             return ("0".to_string(), Type::Void);
         }
-        if fn_name == "gui_confirm" || fn_name == "aps_gui_confirm" {
+        if fn_name == "gui_confirm" || fn_name == "aps_gui_confirm" || fn_name == "confirm" {
             if args.len() >= 2 {
                 let (t_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
                 let (m_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
@@ -3477,13 +3497,221 @@ declare void @aps_gui_error(ptr, ptr)
                 return (r, Type::Bool);
             }
         }
-        if fn_name == "gui_error" || fn_name == "aps_gui_error" {
+        if fn_name == "gui_error" || fn_name == "aps_gui_error" || fn_name == "error" {
             if args.len() >= 2 {
                 let (t_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
                 let (m_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
                 out.push_str(&format!("  call void @aps_gui_error(ptr {}, ptr {})\n", t_v, m_v));
             }
             return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_window_set_dark_mode" || fn_name == "aps_gui_window_set_dark_mode" {
+            if args.len() >= 2 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (en_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::Bool));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_window_set_dark_mode(ptr {}, i64 {})\n", win_ptr, en_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_window_set_bg_color" || fn_name == "aps_gui_window_set_bg_color" {
+            if args.len() >= 4 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (r_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let (g_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (b_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_window_set_bg_color(ptr {}, i64 {}, i64 {}, i64 {})\n", win_ptr, r_v, g_v, b_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_add_checkbox" || fn_name == "aps_gui_add_checkbox" {
+            if args.len() >= 7 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (txt_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (x_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (y_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let (w_v, _) = self.emit_expr(&args[4].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[5].expr, out, locals, Some(&Type::I64));
+                let (chk_v, _) = self.emit_expr(&args[6].expr, out, locals, Some(&Type::Bool));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_add_checkbox(ptr {}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {}, i64 {})\n", r, win_ptr, txt_v, x_v, y_v, w_v, h_v, chk_v));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_checkbox_is_checked" || fn_name == "aps_gui_checkbox_is_checked" {
+            if args.len() >= 2 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_checkbox_is_checked(ptr {}, i64 {})\n", r, win_ptr, id_v));
+                return (r, Type::Bool);
+            }
+        }
+        if fn_name == "gui_checkbox_set_checked" || fn_name == "aps_gui_checkbox_set_checked" {
+            if args.len() >= 3 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let (chk_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::Bool));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_checkbox_set_checked(ptr {}, i64 {}, i64 {})\n", win_ptr, id_v, chk_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_add_progressbar" || fn_name == "aps_gui_add_progressbar" {
+            if args.len() >= 5 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (x_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let (y_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (w_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[4].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_add_progressbar(ptr {}, i64 {}, i64 {}, i64 {}, i64 {})\n", r, win_ptr, x_v, y_v, w_v, h_v));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_progressbar_set_value" || fn_name == "aps_gui_progressbar_set_value" {
+            if args.len() >= 3 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let (val_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_progressbar_set_value(ptr {}, i64 {}, i64 {})\n", win_ptr, id_v, val_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_add_image" || fn_name == "aps_gui_add_image" {
+            if args.len() >= 6 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (path_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (x_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (y_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let (w_v, _) = self.emit_expr(&args[4].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[5].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_add_image(ptr {}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {})\n", r, win_ptr, path_v, x_v, y_v, w_v, h_v));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_add_webview" || fn_name == "aps_gui_add_webview" {
+            if args.len() >= 6 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (url_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (x_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (y_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let (w_v, _) = self.emit_expr(&args[4].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[5].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_add_webview(ptr {}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {})\n", r, win_ptr, url_v, x_v, y_v, w_v, h_v));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_webview_navigate" || fn_name == "aps_gui_webview_navigate" {
+            if args.len() >= 3 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let (url_v, _) = self.emit_expr(&args[2].expr, out, locals, None);
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_webview_navigate(ptr {}, i64 {}, ptr {})\n", win_ptr, id_v, url_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_audio_play" || fn_name == "aps_gui_audio_play" || fn_name == "audio_play" {
+            if let Some(first) = args.first() {
+                let (p_v, _) = self.emit_expr(&first.expr, out, locals, None);
+                out.push_str(&format!("  call void @aps_gui_audio_play(ptr {})\n", p_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_audio_pause" || fn_name == "aps_gui_audio_pause" || fn_name == "audio_pause" {
+            out.push_str("  call void @aps_gui_audio_pause()\n");
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_audio_resume" || fn_name == "aps_gui_audio_resume" || fn_name == "audio_resume" {
+            out.push_str("  call void @aps_gui_audio_resume()\n");
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_audio_stop" || fn_name == "aps_gui_audio_stop" || fn_name == "audio_stop" {
+            out.push_str("  call void @aps_gui_audio_stop()\n");
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_video_create" || fn_name == "aps_gui_video_create" {
+            if args.len() >= 6 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (p_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let (x_v, _) = self.emit_expr(&args[2].expr, out, locals, Some(&Type::I64));
+                let (y_v, _) = self.emit_expr(&args[3].expr, out, locals, Some(&Type::I64));
+                let (w_v, _) = self.emit_expr(&args[4].expr, out, locals, Some(&Type::I64));
+                let (h_v, _) = self.emit_expr(&args[5].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call i64 @aps_gui_video_create(ptr {}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {})\n", r, win_ptr, p_v, x_v, y_v, w_v, h_v));
+                return (r, Type::I64);
+            }
+        }
+        if fn_name == "gui_video_play" || fn_name == "aps_gui_video_play" {
+            if args.len() >= 2 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_video_play(ptr {}, i64 {})\n", win_ptr, id_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_video_pause" || fn_name == "aps_gui_video_pause" {
+            if args.len() >= 2 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_video_pause(ptr {}, i64 {})\n", win_ptr, id_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_video_stop" || fn_name == "aps_gui_video_stop" {
+            if args.len() >= 2 {
+                let (win_v, _) = self.emit_expr(&args[0].expr, out, locals, Some(&Type::I64));
+                let (id_v, _) = self.emit_expr(&args[1].expr, out, locals, Some(&Type::I64));
+                let win_ptr = self.next_reg();
+                out.push_str(&format!("  {} = inttoptr i64 {} to ptr\n", win_ptr, win_v));
+                out.push_str(&format!("  call void @aps_gui_video_stop(ptr {}, i64 {})\n", win_ptr, id_v));
+            }
+            return ("0".to_string(), Type::Void);
+        }
+        if fn_name == "gui_file_open" || fn_name == "aps_gui_file_open" || fn_name == "file_open_dialog" {
+            if args.len() >= 2 {
+                let (t_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
+                let (f_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call ptr @aps_gui_file_open(ptr {}, ptr {})\n", r, t_v, f_v));
+                return (r, Type::String);
+            }
+        }
+        if fn_name == "gui_file_save" || fn_name == "aps_gui_file_save" || fn_name == "file_save_dialog" {
+            if args.len() >= 2 {
+                let (t_v, _) = self.emit_expr(&args[0].expr, out, locals, None);
+                let (f_v, _) = self.emit_expr(&args[1].expr, out, locals, None);
+                let r = self.next_reg();
+                out.push_str(&format!("  {} = call ptr @aps_gui_file_save(ptr {}, ptr {})\n", r, t_v, f_v));
+                return (r, Type::String);
+            }
         }
         if fn_name == "likely" {
             if let Some(first) = args.first() {
@@ -4616,7 +4844,12 @@ declare void @aps_gui_error(ptr, ptr)
             cmd.arg("-lws2_32")
                 .arg("-luser32")
                 .arg("-lgdi32")
-                .arg("-lcomctl32");
+                .arg("-lcomctl32")
+                .arg("-lwinmm")
+                .arg("-lcomdlg32")
+                .arg("-ldwmapi")
+                .arg("-lole32")
+                .arg("-loleaut32");
         }
 
         cmd.arg("-o")
