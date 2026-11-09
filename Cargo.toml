@@ -4,6 +4,9 @@ version = "1.0.0"
 edition = "2021"
 authors = ["APS Compiler Engineering Team"]
 description = "APS (Advanced Performance Systems) Programming Language Compiler, AMA Memory Analyzer, LLVM Backend, Package Manager (apm), and LSP Server"
+license = "MIT"
+repository = "https://github.com/foxteamcode-ops/aps-lang"
+homepage = "https://github.com/foxteamcode-ops/aps-lang"
 
 [lib]
 name = "aps"

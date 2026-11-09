@@ -18,7 +18,7 @@ Thank you for your interest in contributing to the **APS (Advanced Performance S
 
 ### Building from Source
 ```bash
-git clone https://github.com/aps-lang/aps.git
+git clone https://github.com/foxteamcode-ops/aps-lang.git
 cd aps
 cargo build
 ```

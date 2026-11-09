@@ -5,7 +5,7 @@
 
 **A next-generation compiled systems language engineered for raw C speed, zero-cost memory safety without a garbage collector, and modern developer ergonomics.**
 
-[![CI/CD Status](https://github.com/aps-lang/aps/actions/workflows/ci.yml/badge.svg)](https://github.com/aps-lang/aps/actions)
+[![CI/CD Status](https://github.com/foxteamcode-ops/aps-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/foxteamcode-ops/aps-lang/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![LLVM Backend](https://img.shields.io/badge/Backend-LLVM%2018%2B-orange.svg)](https://llvm.org/)
 [![Memory Model](https://img.shields.io/badge/Memory-AMA%20(No%20GC)-brightgreen.svg)](docs/spec/02_memory_architecture.md)
@@ -61,7 +61,7 @@ Equal hardware: AMD Ryzen 9 7950X, 32 GB DDR5 RAM, Windows 11 & Ubuntu 24.04. Al
 
 ### 1. Clone & Build
 ```bash
-git clone https://github.com/aps-lang/aps.git
+git clone https://github.com/foxteamcode-ops/aps-lang.git
 cd aps
 cargo build --release
 ```
